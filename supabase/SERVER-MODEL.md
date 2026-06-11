@@ -10,7 +10,9 @@
 - **messages**: `id`, `chat_id`, `sender_id`, `content_type`, `content_text?`, `content_image_url?`, `content_thumb_url?`, `content_blur_hash?`, `image_width/height`(numeric?), `status`(def 'sent'), `reply_to_message_id?`, `thread_root_id?`, `expires_at?`(TTL), `created_at`.
 - **message_events**: `id`, `chat_id`, `message_id`, `event_type`, `new_text?`, `actor_id`, `created_at`.
 
-## 🔴 Безопасность — критично (на момент инспекции)
+## 🔴 Безопасность — критично (исходное состояние при инспекции)
+
+> **СТАТУС: ИСПРАВЛЕНО.** Миграция `supabase/security/enable-rls.sql` применена к проекту и проверена live: RLS включён на всех 5 таблицах, 12 политик на месте, прямой доступ роли `anon` к таблицам отозван (anon-запрос к `users` → `401 permission denied`). Synthetic smoke-тест под `authenticated` подтвердил: self-доступ работает, чужие профили/сообщения не видны, `delete_user_account` отрабатывает. ⚠️ Полные чат/группа/медиа-флоу нужно проверить на Mac на реальных аккаунтах с общим чатом — там задействованы `is_chat_participant`/`shares_chat_with`, которые smoke-тест (без чатов) не покрыл.
 
 - **RLS ВЫКЛЮЧЕН на всех 5 таблицах** (`rls_enabled=false`), политик нет.
 - **Гранты:** роли `anon` И `authenticated` имеют `SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER` на всех таблицах.
