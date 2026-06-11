@@ -20,6 +20,10 @@ struct AuthView: View {
     @State private var authMethod: AuthMethod = .email
     
     @State private var isLoginMode: Bool = true
+
+    // EULA-гейт регистрации (App Store Guideline 1.2). Тот же ключ читает RootView
+    // для уже вошедших пользователей.
+    @AppStorage("didAcceptEULA") private var didAcceptEULA: Bool = false
     
     @State private var phoneNumber: String = ""
     // SMS-вход скрыт до реализации серверной отправки кода (см. закомментированные phoneAuthSection/sendSMS/verifyCode ниже):
@@ -270,9 +274,31 @@ struct AuthView: View {
                         .padding(.horizontal)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
+
+                // EULA-гейт регистрации (App Store Guideline 1.2)
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle(isOn: $didAcceptEULA) {
+                        Text("Я принимаю условия использования")
+                            .font(.callout)
+                    }
+                    NavigationLink {
+                        ScrollView {
+                            Text(LegalTexts.termsOfUse)
+                                .font(.footnote)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding()
+                        }
+                        .navigationTitle("Условия использования")
+                        .navigationBarTitleDisplayMode(.inline)
+                    } label: {
+                        Text("Читать условия использования")
+                            .font(.caption)
+                    }
+                }
+                .padding(.horizontal, 4)
             }
-            
-            
+
+
             Button(action: submitEmailAuth) {
                 Text(isLoginMode ? "Войти" : "Создать аккаунт")
                     .frame(maxWidth: .infinity)
@@ -296,7 +322,8 @@ struct AuthView: View {
             !nickname.isEmpty && isNicknameValid &&
             cleanPhoneNumber.count >= 11 &&
             password == confirmPassword &&
-            isPhoneValid
+            isPhoneValid &&
+            didAcceptEULA
         }
     }
     

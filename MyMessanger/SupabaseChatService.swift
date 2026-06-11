@@ -785,7 +785,8 @@ class SupabaseChatService: ChatServiceProtocol {
         let myChatDBs = allChatDBs.filter { $0.participantIds.contains(currentUserId) }
         
         var domainChats = [Chat]()
-        
+        let blocked = SupabaseManager.shared.blockedUserIds
+
         for chatDB in myChatDBs {
             var participants = [User]()
             for userId in chatDB.participantIds {
@@ -794,8 +795,17 @@ class SupabaseChatService: ChatServiceProtocol {
                     participants.append(userDB.toDomain())
                 }
             }
-            
-            domainChats.append(chatDB.toDomain(participants: participants, lastMessage: nil))
+
+            let chat = chatDB.toDomain(participants: participants, lastMessage: nil)
+
+            // UGC-модерация: скрываем личный (1:1) чат с заблокированным собеседником.
+            if !chat.isGroup,
+               let interlocutor = chat.participants.first(where: { $0.id != currentUserId }),
+               blocked.contains(interlocutor.id) {
+                continue
+            }
+
+            domainChats.append(chat)
         }
         
         return domainChats.sorted { ($0.lastActivityDate ?? Date.distantPast) > ($1.lastActivityDate ?? Date.distantPast) }
@@ -840,7 +850,8 @@ class SupabaseChatService: ChatServiceProtocol {
                         let senderId = dto.sender_id.uuidString.lowercased()
                         let chatId = dto.chat_id.uuidString.lowercased()
                         
-                        guard senderId != currentUserId else { continue }
+                        // UGC-модерация: пропускаем свои сообщения И входящие от заблокированных.
+                        guard senderId != currentUserId && !SupabaseManager.shared.blockedUserIds.contains(senderId) else { continue }
                         
                         let context = container.mainContext
                         let desc = FetchDescriptor<ChatDB>(predicate: #Predicate { $0.id == chatId })
@@ -1288,6 +1299,69 @@ class SupabaseChatService: ChatServiceProtocol {
         }
     }
     
+    // MARK: - UGC Moderation
+
+    func blockUser(_ userId: String) async throws {
+        guard let userUUID = UUID(uuidString: userId) else { throw URLError(.badURL) }
+        try await client
+            .rpc("block_user", params: ["p_blocked_id": userUUID])
+            .execute()
+        SupabaseManager.shared.addBlockedUserId(userId)
+    }
+
+    func unblockUser(_ userId: String) async throws {
+        guard let userUUID = UUID(uuidString: userId) else { throw URLError(.badURL) }
+        try await client
+            .rpc("unblock_user", params: ["p_blocked_id": userUUID])
+            .execute()
+        SupabaseManager.shared.removeBlockedUserId(userId)
+    }
+
+    func fetchBlockedUsers() async throws -> [User] {
+        let usersDTO: [UserDTO] = try await client
+            .rpc("get_blocked_users")
+            .execute()
+            .value
+
+        let users = usersDTO.map { uDTO in
+            User(
+                id: uDTO.id.uuidString.lowercased(),
+                phoneNumber: uDTO.phone_number ?? "",
+                name: uDTO.name,
+                nickname: uDTO.nickname ?? "",
+                avatar: uDTO.avatar_url != nil ? URL(string: uDTO.avatar_url!) : nil,
+                isOnline: uDTO.is_online
+            )
+        }
+        // Авторитетный снимок с сервера перезаписывает локальный кэш.
+        SupabaseManager.shared.setBlockedUserIds(Set(users.map { $0.id }))
+        return users
+    }
+
+    /// Жалоба на конкретное сообщение: фиксируем автора, само сообщение и чат.
+    func reportContent(message: Message, reason: String) async throws {
+        try await client
+            .rpc("report_content", params: [
+                "p_reported_user_id": AnyJSON.string(message.senderId),
+                "p_message_id": AnyJSON.string(message.id),
+                "p_chat_id": AnyJSON.string(message.chatId),
+                "p_reason": AnyJSON.string(reason)
+            ])
+            .execute()
+    }
+
+    /// Жалоба на пользователя (без привязки к сообщению/чату).
+    func reportUser(userId: String, reason: String) async throws {
+        try await client
+            .rpc("report_content", params: [
+                "p_reported_user_id": AnyJSON.string(userId),
+                "p_message_id": AnyJSON.null,
+                "p_chat_id": AnyJSON.null,
+                "p_reason": AnyJSON.string(reason)
+            ])
+            .execute()
+    }
+
     func fetchRegisteredContacts(phoneNumbers: [String]) async throws -> [User] {
         let usersDTO: [UserDTO] = try await client
             .rpc("get_registered_contacts", params: ["phone_numbers": phoneNumbers])

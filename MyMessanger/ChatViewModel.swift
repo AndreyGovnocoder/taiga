@@ -563,8 +563,13 @@ final class ChatViewModel {
         descriptor.fetchLimit = windowSize
         
         let models = (try? context.fetch(descriptor)) ?? []
+        // UGC-модерация: на display-слое прячем сообщения заблокированных отправителей
+        // (надёжнее, чем полагаться на isHiddenLocally при ре-fetch; группировка ниже
+        // считается уже по видимым сообщениям).
+        let blocked = SupabaseManager.shared.blockedUserIds
         let messages = models.map { $0.toDomain() }
-        
+            .filter { !blocked.contains($0.senderId) }
+
         // Собираем все replyToMessageId для batch-resolve
         let replyIds = Set(messages.compactMap { $0.replyToMessageId })
         var repliedMap: [String: Message] = [:]

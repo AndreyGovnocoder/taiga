@@ -14,6 +14,8 @@ struct ContactsView: View {
     @Environment(\.modelContext) private var context
     
     @State private var viewModel = ContactsViewModel()
+    @State private var moderationNotice: String?
+    @State private var pendingBlockUser: User?
 
     
     var onChatSelected: (Chat) -> Void
@@ -71,6 +73,21 @@ struct ContactsView: View {
                             }
                         }
                         .buttonStyle(.plain)
+                        .contextMenu {
+                            Button {
+                                Task {
+                                    let ok = await viewModel.reportUser(user)
+                                    moderationNotice = ok ? "Жалоба отправлена. Спасибо." : "Не удалось отправить жалобу."
+                                }
+                            } label: {
+                                Label("Пожаловаться", systemImage: "exclamationmark.bubble")
+                            }
+                            Button(role: .destructive) {
+                                pendingBlockUser = user
+                            } label: {
+                                Label("Заблокировать", systemImage: "hand.raised")
+                            }
+                        }
                     }
                     .listStyle(.plain)
                 }
@@ -87,6 +104,34 @@ struct ContactsView: View {
 
             .task {
                 await viewModel.fetchContacts()
+            }
+            .alert("Готово", isPresented: Binding(
+                get: { moderationNotice != nil },
+                set: { if !$0 { moderationNotice = nil } }
+            )) {
+                Button("OK") { moderationNotice = nil }
+            } message: {
+                Text(moderationNotice ?? "")
+            }
+            .confirmationDialog(
+                pendingBlockUser.map { "Заблокировать \($0.name)?" } ?? "Заблокировать?",
+                isPresented: Binding(
+                    get: { pendingBlockUser != nil },
+                    set: { if !$0 { pendingBlockUser = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Заблокировать", role: .destructive) {
+                    if let user = pendingBlockUser {
+                        Task {
+                            let ok = await viewModel.blockUser(user)
+                            moderationNotice = ok ? "Пользователь заблокирован." : "Не удалось заблокировать."
+                        }
+                    }
+                }
+                Button("Отмена", role: .cancel) { }
+            } message: {
+                Text("Вы больше не будете видеть сообщения этого пользователя.")
             }
         }
     }

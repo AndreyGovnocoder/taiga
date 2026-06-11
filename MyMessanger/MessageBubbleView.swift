@@ -32,6 +32,7 @@ struct TaigaMessageCell: TiledCellContent {
     var onRetry: (() -> Void)?
     var onCopy: (() -> Void)?
     var onForward: (() -> Void)?
+    var onReport: (() -> Void)?
     var onSelect: (() -> Void)?
     var onEdit: ((Message) -> Void)?
     
@@ -317,6 +318,15 @@ struct AnimatableMessageCellWrapper<Content: View>: View {
                 
                 Divider()
                 
+                // Пожаловаться (только на чужие сообщения)
+                if !item.isCurrentUser {
+                    Button(role: .destructive) {
+                        onReport?()
+                    } label: {
+                        Label("Пожаловаться", systemImage: "exclamationmark.bubble")
+                    }
+                }
+
                 // Выбрать
                 Button {
                     onSelect?()

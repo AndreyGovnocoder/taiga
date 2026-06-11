@@ -20,6 +20,7 @@ struct ChatDetailView: View {
     @Environment(\.modelContext) private var context
     @Environment(AppRouter.self) private var router
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dismiss) private var dismiss
     
     @State private var viewModel: ChatViewModel
     @State private var scrollPosition: TiledScrollPosition
@@ -59,7 +60,12 @@ struct ChatDetailView: View {
     @State private var showDeleteError: Bool = false
     @State private var showGroupInfo: Bool = false
     @State private var showSavedToast: Bool = false
-    
+
+    // UGC-модерация
+    @State private var reportTargetMessage: Message?
+    @State private var showBlockConfirm: Bool = false
+    @State private var moderationNotice: String?
+
     init(chat: Chat) {
         self.chat = chat
         self._viewModel = State(initialValue: ChatViewModel(chat: chat))
@@ -73,6 +79,13 @@ struct ChatDetailView: View {
         guard let geometry = scrollGeometry else { return true }
         return geometry.pointsFromBottom < 100
     }
+
+    /// Собеседник в личном (1:1) чате — для блокировки/жалобы из шапки.
+    private var interlocutor: User? {
+        guard !chat.isGroup else { return nil }
+        let currentId = SupabaseManager.shared.currentUserId ?? ""
+        return chat.participants.first(where: { $0.id != currentId })
+    }
     
     // MARK: - Body
     
@@ -84,6 +97,37 @@ struct ChatDetailView: View {
             .toolbar { toolbarContent }
             .sheet(isPresented: $showGroupInfo) {
                 GroupInfoView(chat: chat)
+            }
+            .confirmationDialog("Пожаловаться на сообщение?", isPresented: Binding(
+                get: { reportTargetMessage != nil },
+                set: { if !$0 { reportTargetMessage = nil } }
+            ), titleVisibility: .visible) {
+                Button("Пожаловаться", role: .destructive) {
+                    if let msg = reportTargetMessage { reportMessage(msg) }
+                }
+                Button("Отмена", role: .cancel) { }
+            } message: {
+                Text("Жалоба будет отправлена на модерацию.")
+            }
+            .confirmationDialog(
+                interlocutor.map { "Заблокировать \($0.name)?" } ?? "Заблокировать?",
+                isPresented: $showBlockConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Заблокировать", role: .destructive) {
+                    if let user = interlocutor { blockInterlocutor(user) }
+                }
+                Button("Отмена", role: .cancel) { }
+            } message: {
+                Text("Вы больше не будете видеть сообщения этого пользователя.")
+            }
+            .alert("Готово", isPresented: Binding(
+                get: { moderationNotice != nil },
+                set: { if !$0 { moderationNotice = nil } }
+            )) {
+                Button("ОК", role: .cancel) { }
+            } message: {
+                Text(moderationNotice ?? "")
             }
             .alert("Ошибка удаления", isPresented: $showDeleteError) {
                 Button("ОК", role: .cancel) { }
@@ -212,6 +256,26 @@ struct ChatDetailView: View {
         if !isSelectionMode {
             ToolbarItem(placement: .principal) {
                 principalToolbarLabel
+            }
+        }
+        // UGC-модерация: меню «…» с жалобой/блокировкой собеседника (только 1:1;
+        // для групп эти действия живут в GroupInfoView на участнике).
+        if !isSelectionMode && !chat.isGroup {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button {
+                        if let user = interlocutor { reportUser(user) }
+                    } label: {
+                        Label("Пожаловаться", systemImage: "exclamationmark.bubble")
+                    }
+                    Button(role: .destructive) {
+                        showBlockConfirm = true
+                    } label: {
+                        Label("Заблокировать", systemImage: "hand.raised")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
             }
         }
         if isSelectionMode {
@@ -707,6 +771,9 @@ struct ChatDetailView: View {
             onForward: {
                 // TODO: реализовать пересылку
             },
+            onReport: {
+                reportTargetMessage = chatItem.message
+            },
             onSelect: {
                 if isSelectionMode {
                     toggleSelection(chatItem.message.id)
@@ -736,6 +803,43 @@ struct ChatDetailView: View {
         )
     }
     
+    // MARK: - Moderation Actions
+
+    private func reportMessage(_ message: Message) {
+        Task {
+            do {
+                try await viewModel.chatService.reportContent(message: message, reason: "Жалоба из чата")
+                moderationNotice = "Жалоба отправлена. Спасибо."
+            } catch {
+                moderationNotice = "Не удалось отправить жалобу. Попробуйте позже."
+            }
+        }
+    }
+
+    private func reportUser(_ user: User) {
+        Task {
+            do {
+                try await viewModel.chatService.reportUser(userId: user.id, reason: "Жалоба на пользователя")
+                moderationNotice = "Жалоба отправлена. Спасибо."
+            } catch {
+                moderationNotice = "Не удалось отправить жалобу. Попробуйте позже."
+            }
+        }
+    }
+
+    private func blockInterlocutor(_ user: User) {
+        Task {
+            do {
+                try await viewModel.chatService.blockUser(user.id)
+                // Обновляем список чатов, чтобы скрытый 1:1 с заблокированным исчез сразу.
+                NotificationCenter.default.post(name: .newChatDetected, object: nil)
+                dismiss()
+            } catch {
+                moderationNotice = "Не удалось заблокировать. Попробуйте позже."
+            }
+        }
+    }
+
     private var tiledMessageList: some View {
         TiledView(
             dataSource: viewModel.dataSource,

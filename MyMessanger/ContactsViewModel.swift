@@ -69,15 +69,44 @@ class ContactsViewModel {
             let users = try await chatService.fetchRegisteredContacts(phoneNumbers: Array(rawPhoneNumbers))
             
             let currentUserId = SupabaseManager.shared.currentUserId ?? ""
-            
+            // UGC-модерация: сервер уже исключает block-связь, но фильтруем и на клиенте
+            // (закэшированные/несинхронные данные + мгновенность).
+            let blocked = SupabaseManager.shared.blockedUserIds
+
             self.registeredUsers = users
                 .filter { $0.id != currentUserId }
+                .filter { !blocked.contains($0.id) }
                 .sorted { $0.name < $1.name }
         } catch {
             errorMessage = "Ошибка получения контактов: \(error.localizedDescription)"
         }
-        
+
         isLoading = false
+    }
+
+    // MARK: - UGC Moderation
+    // Возвращают успех/неуспех; НЕ трогают errorMessage (он рендерит полноэкранное
+    // состояние списка контактов) — фидбэк показывает сама вьюха локальным алертом.
+
+    @MainActor
+    func blockUser(_ user: User) async -> Bool {
+        do {
+            try await chatService.blockUser(user.id)
+            registeredUsers.removeAll { $0.id == user.id }
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    @MainActor
+    func reportUser(_ user: User) async -> Bool {
+        do {
+            try await chatService.reportUser(userId: user.id, reason: "Жалоба на контакт")
+            return true
+        } catch {
+            return false
+        }
     }
     
     @MainActor

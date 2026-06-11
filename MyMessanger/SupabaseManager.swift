@@ -37,9 +37,42 @@ final class SupabaseManager: @unchecked Sendable {
             UserDefaults.standard.set(userId, forKey: Self.userIdKey)
         } else {
             UserDefaults.standard.removeObject(forKey: Self.userIdKey)
+            // При логауте сбрасываем кэш блокировок, чтобы следующий пользователь
+            // на этом устройстве не унаследовал чужой набор (его пересоберёт fetchBlockedUsers).
+            UserDefaults.standard.removeObject(forKey: Self.blockedKey)
+            // EULA-согласие тоже per-account: следующий пользователь на устройстве должен
+            // принять условия сам (App Store Guideline 1.2). Симметрично blockedKey.
+            UserDefaults.standard.removeObject(forKey: "didAcceptEULA")
         }
     }
-    
+
+    // MARK: - Единый source of truth для заблокированных пользователей (UGC-модерация)
+
+    private static let blockedKey = "blockedUserIds"
+
+    /// Множество id заблокированных пользователей (lowercase UUID). Персистится в UserDefaults,
+    /// чтобы фильтрация работала уже при мгновенном локальном рендере и переживала перезапуск.
+    /// Авторитетный источник — сервер (fetchBlockedUsers); block/unblock обновляют набор сразу.
+    var blockedUserIds: Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: Self.blockedKey) ?? [])
+    }
+
+    func setBlockedUserIds(_ ids: Set<String>) {
+        UserDefaults.standard.set(Array(ids), forKey: Self.blockedKey)
+    }
+
+    func addBlockedUserId(_ id: String) {
+        var ids = blockedUserIds
+        ids.insert(id.lowercased())
+        setBlockedUserIds(ids)
+    }
+
+    func removeBlockedUserId(_ id: String) {
+        var ids = blockedUserIds
+        ids.remove(id.lowercased())
+        setBlockedUserIds(ids)
+    }
+
     private init() {}
 }
 

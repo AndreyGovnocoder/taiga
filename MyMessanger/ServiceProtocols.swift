@@ -69,6 +69,13 @@ protocol ChatServiceProtocol {
     @MainActor func deleteMessageEphemeral(_ message: Message, context: ModelContext) async throws
     @MainActor func deleteMessagesEphemeral(_ messages: [Message], context: ModelContext) async throws
     
+    // MARK: - UGC Moderation
+    @MainActor func blockUser(_ userId: String) async throws
+    @MainActor func unblockUser(_ userId: String) async throws
+    @MainActor func fetchBlockedUsers() async throws -> [User]
+    @MainActor func reportContent(message: Message, reason: String) async throws
+    @MainActor func reportUser(userId: String, reason: String) async throws
+
     // MARK: - Backup (TODO)
     func exportChatBackup() async throws
     func importChatBackup(from url: URL) async throws

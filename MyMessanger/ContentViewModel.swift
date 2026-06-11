@@ -51,6 +51,10 @@ class ContentViewModel {
         await chatService.retryPendingMessages(context: context)
         
         do {
+            // 0. UGC-модерация: обновляем набор заблокированных (для фильтрации чатов/сообщений/контактов).
+            //    try? — сбой модерации не должен ломать загрузку чатов.
+            _ = try? await chatService.fetchBlockedUsers()
+
             // 4. Синхронизируем пропущенные events (удаления/редактирования) перед загрузкой чатов
             try? await chatService.syncMessageEvents(context: context)
             

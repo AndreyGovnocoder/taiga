@@ -43,6 +43,14 @@ struct AccountSettingsView: View {
             }
             
             Section {
+                NavigationLink {
+                    BlockedUsersView()
+                } label: {
+                    Label("Заблокированные", systemImage: "hand.raised")
+                }
+            }
+
+            Section {
                 Button {
                     logout()
                 } label: {

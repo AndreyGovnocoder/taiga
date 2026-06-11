@@ -29,6 +29,8 @@ struct GroupInfoView: View {
     @State private var groupAvatar: URL? = nil
     @State private var avatarItem: PhotosPickerItem?
     @State private var isUpdatingAvatar: Bool = false
+    @State private var moderationNotice: String?
+    @State private var pendingBlockUser: User?
     
     private var initialAvatarURL: URL? {
         if case .group(_, let url) = chat.type {
@@ -189,6 +191,20 @@ struct GroupInfoView: View {
                                     }
                                 }
                             }
+                            .contextMenu {
+                                if participant.user.id != currentUserId {
+                                    Button {
+                                        reportParticipant(participant.user)
+                                    } label: {
+                                        Label("Пожаловаться", systemImage: "exclamationmark.bubble")
+                                    }
+                                    Button(role: .destructive) {
+                                        pendingBlockUser = participant.user
+                                    } label: {
+                                        Label("Заблокировать", systemImage: "hand.raised")
+                                    }
+                                }
+                            }
                         }
                     }
                 } header: {
@@ -221,6 +237,29 @@ struct GroupInfoView: View {
                 Button("OK") { errorMessage = nil }
             } message: {
                 Text(errorMessage ?? "")
+            }
+            .alert("Готово", isPresented: Binding(
+                get: { moderationNotice != nil },
+                set: { if !$0 { moderationNotice = nil } }
+            )) {
+                Button("OK") { moderationNotice = nil }
+            } message: {
+                Text(moderationNotice ?? "")
+            }
+            .confirmationDialog(
+                pendingBlockUser.map { "Заблокировать \($0.name)?" } ?? "Заблокировать?",
+                isPresented: Binding(
+                    get: { pendingBlockUser != nil },
+                    set: { if !$0 { pendingBlockUser = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Заблокировать", role: .destructive) {
+                    if let user = pendingBlockUser { blockParticipant(user) }
+                }
+                Button("Отмена", role: .cancel) { }
+            } message: {
+                Text("Вы больше не будете видеть сообщения этого пользователя.")
             }
             .confirmationDialog("Покинуть группу?", isPresented: $showLeaveConfirm, titleVisibility: .visible) {
                 Button("Покинуть", role: .destructive) {
@@ -290,6 +329,30 @@ struct GroupInfoView: View {
                 participants.removeAll { $0.user.id == user.id }
             } catch {
                 errorMessage = "Ошибка удаления: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    // UGC-модерация: блокировка не исключает участника из группы (он остаётся членом),
+    // но его сообщения перестают отображаться (realtime-guard + display-фильтр).
+    private func blockParticipant(_ user: User) {
+        Task {
+            do {
+                try await chatService.blockUser(user.id)
+                moderationNotice = "Пользователь заблокирован. Вы не будете видеть его сообщения."
+            } catch {
+                errorMessage = "Не удалось заблокировать: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func reportParticipant(_ user: User) {
+        Task {
+            do {
+                try await chatService.reportUser(userId: user.id, reason: "Жалоба на участника группы")
+                moderationNotice = "Жалоба отправлена. Спасибо."
+            } catch {
+                errorMessage = "Не удалось отправить жалобу: \(error.localizedDescription)"
             }
         }
     }
