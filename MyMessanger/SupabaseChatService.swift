@@ -188,7 +188,15 @@ class SupabaseChatService: ChatServiceProtocol {
                 )
                 context.insert(msgDB)
             } else {
-                existing?.status = MessageStatus(rawValue: dto.status) ?? existing!.status
+                // НЕ перетираем серверным .sent статус СВОИХ ещё-не-доставленных сообщений
+                // (.sending — медиа в фоновой загрузке; .failed — ждёт ретрая): иначе незавершённая
+                // доставка маскируется под отправленную. Статус исходящих ведёт только send/deliver/retry.
+                let currentUserId = (SupabaseManager.shared.currentUserId ?? "").lowercased()
+                let isOwnPending = existing?.senderId == currentUserId
+                    && (existing?.status == .sending || existing?.status == .failed)
+                if !isOwnPending {
+                    existing?.status = MessageStatus(rawValue: dto.status) ?? existing!.status
+                }
                 // Обновляем threadRootId (мог быть nil на оптимистичном сообщении)
                 if existing?.threadRootId == nil, let serverThreadRoot = dto.thread_root_id {
                     existing?.threadRootId = serverThreadRoot.uuidString.lowercased()
@@ -812,8 +820,9 @@ class SupabaseChatService: ChatServiceProtocol {
     }
     
     func subscribeToAllChats(container: ModelContainer) async throws {
-        let currentUserId = (SupabaseManager.shared.currentUserId ?? "").lowercased()
-        
+        // currentUserId НЕ захватываем здесь — читаем живьём в каждом обработчике (ниже):
+        // если за сессию был logout→login, захваченное значение указывало бы на прошлого юзера
+        // (container — shared singleton, переживает logout) → кросс-аккаунтная запись.
         let channel = client.channel("global_messages")
 
         // AsyncStream — регистрируем подписки ДО subscribe (требование SDK)
@@ -849,7 +858,12 @@ class SupabaseChatService: ChatServiceProtocol {
                         
                         let senderId = dto.sender_id.uuidString.lowercased()
                         let chatId = dto.chat_id.uuidString.lowercased()
-                        
+
+                        // currentUserId — ЖИВЬЁМ (не захваченный при подписке): иначе после
+                        // logout→login писали бы сообщения прошлого юзера в стор нового.
+                        let currentUserId = (SupabaseManager.shared.currentUserId ?? "").lowercased()
+                        guard !currentUserId.isEmpty else { continue }
+
                         // UGC-модерация: пропускаем свои сообщения И входящие от заблокированных.
                         guard senderId != currentUserId && !SupabaseManager.shared.blockedUserIds.contains(senderId) else { continue }
                         
@@ -887,7 +901,10 @@ class SupabaseChatService: ChatServiceProtocol {
                         
                         let actorId = dto.actor_id.uuidString.lowercased()
                         let chatId = dto.chat_id.uuidString.lowercased()
-                        
+
+                        let currentUserId = (SupabaseManager.shared.currentUserId ?? "").lowercased()
+                        guard !currentUserId.isEmpty else { continue }
+
                         guard actorId != currentUserId else { continue }
                         
                         let context = container.mainContext
@@ -910,20 +927,16 @@ class SupabaseChatService: ChatServiceProtocol {
         // Draft-чат — нечего отмечать
         guard let chatUUID = UUID(uuidString: chatId) else { return }
         
-        let session  = try await client.auth.session
-        let myUserId = session.user.id
-        
         let fetchDescriptor = FetchDescriptor<ChatDB>(predicate: #Predicate { $0.id == chatId })
         if let chatDB = try? context.fetch(fetchDescriptor).first {
             chatDB.unreadCount = 0
             try? context.save()
         }
-        
+
+        // Идемпотентная серверная пометка (high-water mark): атомарно двигает last_read_at (GREATEST)
+        // и обнуляет unread_count через RPC — без TOCTOU прежнего прямого update set=0.
         try await client
-            .from("chat_participants")
-            .update(UpdateUnreadDTO(unread_count: 0))
-            .eq("chat_id", value: chatUUID)
-            .eq("user_id", value: myUserId)
+            .rpc("mark_chat_read", params: ["p_chat_id": chatUUID])
             .execute()
     }
     
@@ -1583,11 +1596,13 @@ class SupabaseChatService: ChatServiceProtocol {
     /// Синхронизация пропущенных событий (удаления/редактирования) при запуске.
     /// Клиент запрашивает message_events с момента последней синхронизации.
     func syncMessageEvents(context: ModelContext) async throws {
-        let lastSync = UserDefaults.standard.object(forKey: "lastEventSyncDate") as? Date ?? Date.distantPast
-        
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let sinceStr = formatter.string(from: lastSync)
+        // Курсор — строка СЕРВЕРНОГО created_at (НЕ Date() устройства: clock skew уводил курсор
+        // в будущее и события в зазоре терялись). Старое Date-значение прочитается как nil →
+        // разовый полный ре-синк (идемпотентно).
+        let sinceStr = UserDefaults.standard.string(forKey: "lastEventSyncDate")
+            ?? formatter.string(from: .distantPast)
         
         let events: [MessageEventDTO] = try await client
             .from("message_events")
@@ -1597,17 +1612,23 @@ class SupabaseChatService: ChatServiceProtocol {
             .execute()
             .value
         
-        guard !events.isEmpty else {
-            UserDefaults.standard.set(Date(), forKey: "lastEventSyncDate")
-            return
-        }
-        
+        guard !events.isEmpty else { return }  // нет событий — курсор НЕ двигаем
+
         print("SYNC: Получено \(events.count) пропущенных событий")
-        
+
+        // Курсор двигаем только по НЕПРЕРЫВНОМУ применённому префиксу: событие для ещё не
+        // подгруженного пагинацией сообщения оставляет курсор до него — переиграем позже
+        // (применение идемпотентно). Иначе delete-for-everyone/edited молча терялись.
+        var appliedPrefixCursor: String? = nil
+        var sawSkip = false
+
         for event in events {
             let msgId = event.message_id.uuidString.lowercased()
             let fetchDesc = FetchDescriptor<MessageDB>(predicate: #Predicate { $0.id == msgId })
-            guard let msgDB = try? context.fetch(fetchDesc).first else { continue }
+            guard let msgDB = try? context.fetch(fetchDesc).first else {
+                sawSkip = true
+                continue
+            }
             
             switch event.event_type {
             case "deleted":
@@ -1630,11 +1651,20 @@ class SupabaseChatService: ChatServiceProtocol {
             default:
                 break
             }
+
+            if !sawSkip {
+                appliedPrefixCursor = formatter.string(from: event.created_at)
+            }
         }
-        
+
         try? context.save()
-        UserDefaults.standard.set(Date(), forKey: "lastEventSyncDate")
-        print("SYNC: Применено \(events.count) событий")
+
+        // Курсор — на последнее событие непрерывно-применённого префикса. Если первое же
+        // событие пропущено (нет локального сообщения) — курсор НЕ двигаем, повторим позже.
+        if let cursor = appliedPrefixCursor {
+            UserDefaults.standard.set(cursor, forKey: "lastEventSyncDate")
+        }
+        print("SYNC: обработано \(events.count); курсор=\(appliedPrefixCursor ?? "без сдвига")")
     }
     
     /// Редактирование текстового сообщения (только своё, в пределах TTL)

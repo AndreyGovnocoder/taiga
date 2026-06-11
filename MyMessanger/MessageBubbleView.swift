@@ -464,8 +464,13 @@ struct AnimatableMessageCellWrapper<Content: View>: View {
     ]
     
     private func senderColor(for senderId: String) -> Color {
-        let hash = abs(senderId.hashValue)
-        return Self.senderColors[hash % Self.senderColors.count]
+        // Детерминированный хэш по UTF8-байтам (FNV-1a): String.hashValue рандомизирован
+        // per-process, иначе цвет участника менялся бы при каждом запуске приложения.
+        var hash: UInt64 = 1469598103934665603
+        for byte in senderId.utf8 {
+            hash = (hash ^ UInt64(byte)) &* 1099511628211
+        }
+        return Self.senderColors[Int(hash % UInt64(Self.senderColors.count))]
     }
     
     // MARK: - Meta Row (время + статус)

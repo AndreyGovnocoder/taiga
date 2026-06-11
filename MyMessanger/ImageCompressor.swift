@@ -200,16 +200,18 @@ extension Data {
     /// Проверяет, является ли Data файлом HEIC/HEIF по magic bytes
     var isHEIC: Bool {
         guard self.count >= 12 else { return false }
-        let ftypRange = self[4..<8]
-        guard String(data: ftypRange, encoding: .ascii) == "ftyp" else { return false }
-        let brandRange = self[8..<12]
-        let brand = String(data: brandRange, encoding: .ascii) ?? ""
+        // 0-based копия первых байт: Data может быть срезом (индексы не обязательно с нуля),
+        // прямой self[4..<8] на срезе читал бы не те байты или падал.
+        let head = Array(self.prefix(12))
+        guard String(bytes: head[4..<8], encoding: .ascii) == "ftyp" else { return false }
+        let brand = String(bytes: head[8..<12], encoding: .ascii) ?? ""
         return ["heic", "heix", "mif1", "hevc"].contains(brand)
     }
-    
+
     /// Проверяет, является ли Data файлом PNG по magic bytes (89 50 4E 47)
     var isPNG: Bool {
         guard self.count >= 4 else { return false }
-        return self[0] == 0x89 && self[1] == 0x50 && self[2] == 0x4E && self[3] == 0x47
+        let head = Array(self.prefix(4))
+        return head[0] == 0x89 && head[1] == 0x50 && head[2] == 0x4E && head[3] == 0x47
     }
 }

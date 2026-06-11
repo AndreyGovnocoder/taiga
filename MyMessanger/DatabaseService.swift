@@ -60,7 +60,10 @@ class DatabaseService {
             let chatDesc = FetchDescriptor<ChatDB>(predicate: #Predicate { $0.id == chatId })
             if let chatDB = try modelContext.fetch(chatDesc).first {
                 chatDB.lastMessageId = msgId
-                if senderId != currentUserId {
+                // Клиентский инкремент только для НЕ-muted: сервер инкрементит так же
+                // (handle_new_message … and is_muted = false), иначе локальный счётчик/бейдж
+                // разойдётся с серверным unread_count.
+                if senderId != currentUserId && !chatDB.isMuted {
                     chatDB.unreadCount += 1
                 }
                 chatDB.updateSnapshot(context: modelContext)

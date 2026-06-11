@@ -43,6 +43,9 @@ final class SupabaseManager: @unchecked Sendable {
             // EULA-согласие тоже per-account: следующий пользователь на устройстве должен
             // принять условия сам (App Store Guideline 1.2). Симметрично blockedKey.
             UserDefaults.standard.removeObject(forKey: "didAcceptEULA")
+            // Курсор синхронизации событий: локальный кэш стирается при logout, курсор должен
+            // начать с нуля для нового пользователя.
+            UserDefaults.standard.removeObject(forKey: "lastEventSyncDate")
         }
     }
 
