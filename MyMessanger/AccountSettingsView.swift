@@ -162,13 +162,17 @@ struct AccountSettingsView: View {
         errorMessage = nil
         Task {
             do {
-                clearLocalData()
+                // Server-first: сперва удаляем аккаунт на сервере (+выход), и только
+                // ПОСЛЕ успеха чистим локальный кэш. Иначе при ошибке RPC получим
+                // «аккаунт-зомби»: локально пусто, а на сервере аккаунт жив.
                 try await router.authService.deleteAccount()
+                clearLocalData()
                 await MainActor.run {
                     isDeleting = false
                     router.state = .auth
                 }
             } catch {
+                // Ничего локального ещё не удалено — состояние восстановимо, можно повторить.
                 await MainActor.run {
                     isDeleting = false
                     errorMessage = "Ошибка удаления аккаунта: \(error.localizedDescription)"

@@ -15,7 +15,7 @@ import UIKit
 class SupabaseChatService: ChatServiceProtocol {
 
     private let client = SupabaseManager.shared.client
-    
+
     /// Принудительное переподключение realtime (после сна / выхода из фона)
     func reconnectRealtime() async {
         client.realtimeV2.disconnect()
@@ -642,10 +642,20 @@ class SupabaseChatService: ChatServiceProtocol {
                     progressManager.setProgress(0.7, for: msgId)
                 }
                 
+                guard let msgUUID = UUID(uuidString: message.id),
+                      let chatUUID = UUID(uuidString: message.chatId),
+                      let senderUUID = UUID(uuidString: message.senderId) else {
+                    print("СЕРВЕР: Некорректный UUID при отправке медиа — помечаем .failed")
+                    progressManager.removeProgress(for: msgId)
+                    localMsgDB.status = .failed
+                    try? context.save()
+                    return
+                }
+
                 let sendDTO = MessageInsertDTO(
-                    id: UUID(uuidString: message.id)!,
-                    chat_id: UUID(uuidString: message.chatId)!,
-                    sender_id: UUID(uuidString: message.senderId)!,
+                    id: msgUUID,
+                    chat_id: chatUUID,
+                    sender_id: senderUUID,
                     reply_to_message_id: message.replyToMessageId != nil ? UUID(uuidString: message.replyToMessageId!) : nil,
                     thread_root_id: nil,
                     content_type: "image",
@@ -795,7 +805,7 @@ class SupabaseChatService: ChatServiceProtocol {
         let currentUserId = (SupabaseManager.shared.currentUserId ?? "").lowercased()
         
         let channel = client.channel("global_messages")
-        
+
         // AsyncStream — регистрируем подписки ДО subscribe (требование SDK)
         let messageInserts = channel.postgresChange(
             InsertAction.self, schema: "public", table: "messages"
@@ -979,7 +989,7 @@ class SupabaseChatService: ChatServiceProtocol {
     func deleteMessages(_ messages: [Message], context: ModelContext) async throws {
         guard !messages.isEmpty else { return }
         
-        let chatId = messages.first!.chatId
+        guard let chatId = messages.first?.chatId else { return }
         let cId = chatId
         let messageIds = messages.map { $0.id }
         
@@ -1152,15 +1162,16 @@ class SupabaseChatService: ChatServiceProtocol {
                     }
                     
                     guard let msgUUID = UUID(uuidString: msgIdStr),
-                          let chatUUID = UUID(uuidString: chatId) else {
-                        print("MEDIA: Invalid UUID — msgId: \(msgIdStr), chatId: \(chatId)")
+                          let chatUUID = UUID(uuidString: chatId),
+                          let senderUUID = UUID(uuidString: myUserIdStr) else {
+                        print("MEDIA: Invalid UUID — msgId: \(msgIdStr), chatId: \(chatId), sender: \(myUserIdStr)")
                         return
                     }
-                    
+
                     let sendDTO = MessageInsertDTO(
                         id: msgUUID,
                         chat_id: chatUUID,
-                        sender_id: UUID(uuidString: myUserIdStr)!,
+                        sender_id: senderUUID,
                         reply_to_message_id: replyToMessageId != nil ? UUID(uuidString: replyToMessageId!) : nil,
                         thread_root_id: threadRootId != nil ? UUID(uuidString: threadRootId!) : nil,
                         content_type: "image",
@@ -1268,8 +1279,11 @@ class SupabaseChatService: ChatServiceProtocol {
         if type == "text" {
             return .text(text ?? "")
         } else {
-            let original = URL(string: imageUrl ?? "https://example.com")!
-            let thumb = thumbUrl != nil ? URL(string: thumbUrl!) : nil
+            guard let original = URL(string: imageUrl ?? "") else {
+                // Битый/непарсимый URL картинки с сервера — деградируем в текст, а не крашимся.
+                return .text(text ?? "")
+            }
+            let thumb = thumbUrl.flatMap { URL(string: $0) }
             return .image(imageURL: original, thumbURL: thumb, text: text, width: width, height: height, blurHash: blurHash)
         }
     }
@@ -1376,8 +1390,11 @@ class SupabaseChatService: ChatServiceProtocol {
         
         // Перезагружаем чаты для обновления локальной базы
         _ = try await self.fetchChats(context: context)
-        
-        return URL(string: newAvatarURL)!
+
+        guard let url = URL(string: newAvatarURL) else {
+            throw NSError(domain: "ChatService", code: 500, userInfo: [NSLocalizedDescriptionKey: "Некорректный URL аватара"])
+        }
+        return url
     }
     
     @MainActor
@@ -1695,7 +1712,7 @@ class SupabaseChatService: ChatServiceProtocol {
         // Локальные скрытия (batch)
         if !localHides.isEmpty {
             let hideIds = localHides.map { $0.id }
-            let chatId = messages.first!.chatId
+            guard let chatId = messages.first?.chatId else { return }
             let cId = chatId
             let msgDesc = FetchDescriptor<MessageDB>(predicate: #Predicate { $0.chatId == cId })
             if let allMsgs = try? context.fetch(msgDesc) {

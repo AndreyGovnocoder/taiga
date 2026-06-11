@@ -82,8 +82,11 @@ class DatabaseService {
         if type == "text" {
             return .text(text ?? "")
         } else {
-            let original = URL(string: imageUrl ?? "https://example.com")!
-            let thumb = thumbUrl != nil ? URL(string: thumbUrl!) : nil
+            guard let original = URL(string: imageUrl ?? "") else {
+                // Битый/непарсимый URL картинки с сервера — деградируем в текст, а не крашимся.
+                return .text(text ?? "")
+            }
+            let thumb = thumbUrl.flatMap { URL(string: $0) }
             return .image(imageURL: original, thumbURL: thumb, text: text, width: width, height: height, blurHash: blurHash)
         }
     }

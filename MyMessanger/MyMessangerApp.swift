@@ -129,24 +129,28 @@ struct MyMessangerApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate: AppDelegate
     
     var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            UserDB.self, MessageDB.self, ChatDB.self
-        ])
+        // Версионированная схема (база миграций). Сегодня no-op относительно прежней
+        // Schema([...]) тех же моделей — формат хранения не меняется. Будущие правки @Model
+        // добавляются как SchemaV2 + MigrationStage (мигрируемо, без потери локального кэша).
+        let schema = Schema(versionedSchema: MessageSchemaV1.self)
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            return try ModelContainer(for: schema, migrationPlan: MessageMigrationPlan.self, configurations: [modelConfiguration])
         } catch {
-            print("СЕРВЕР: ⚠️ Ошибка структуры БД SwiftData. База будет сброшена для применения новых настроек (iOS 18)...")
+            // Последний рубеж: повреждение/несовместимая миграция не должны делать запуск
+            // невозможным. Логируем причину ДО сброса (иначе кэш теряется молча), затем
+            // пересоздаём пустую БД (данные — кэш сервера, восстановимы при следующей синхронизации).
+            print("SwiftData: ⚠️ Не удалось открыть хранилище (\(error)). Сбрасываем локальный кэш и пересоздаём БД.")
             let storeURL = modelConfiguration.url
             try? FileManager.default.removeItem(at: storeURL)
             try? FileManager.default.removeItem(at: storeURL.deletingPathExtension().appendingPathExtension("sqlite-shm"))
             try? FileManager.default.removeItem(at: storeURL.deletingPathExtension().appendingPathExtension("sqlite-wal"))
-            
+
             do {
-                return try ModelContainer(for: schema, configurations: [modelConfiguration])
+                return try ModelContainer(for: schema, migrationPlan: MessageMigrationPlan.self, configurations: [modelConfiguration])
             } catch {
-                fatalError("Не удалось создать ModelContainer: \(error)")
+                fatalError("Не удалось создать ModelContainer даже после сброса: \(error)")
             }
         }
     }()

@@ -44,7 +44,7 @@ class SupabaseAuthService: AuthServiceProtocol {
                     phoneNumber: userDTO.phone_number ?? "",
                     name: userDTO.name,
                     nickname: userDTO.nickname ?? "user",
-                    avatar: userDTO.avatar_url != nil ? URL(string: userDTO.avatar_url!)! : nil,
+                    avatar: userDTO.avatar_url.flatMap { URL(string: $0) },
                     isOnline: userDTO.is_online
                 )
             }
@@ -121,8 +121,13 @@ class SupabaseAuthService: AuthServiceProtocol {
     }
     
     func deleteAccount() async throws {
+        // Сервер — первым: аккаунт должен реально удалиться, прежде чем трогаем локальные данные.
+        // Если RPC упадёт — бросаем ошибку и НИЧЕГО локально не теряем (состояние восстановимо).
         try await client.rpc("delete_user_account").execute()
-        try await logout()
+        // Аккаунт уже удалён на сервере. Ошибка выхода из сессии не должна выглядеть как «ошибка удаления».
+        try? await logout()
+        SupabaseManager.shared.setCurrentUserId(nil)
+        currentUser = nil
     }
     
     func updateProfile(name: String, nickname: String, avatarData: Data?) async throws -> User {

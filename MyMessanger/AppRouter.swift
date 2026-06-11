@@ -35,8 +35,8 @@ class AppRouter {
                 switch event {
                 case .initialSession:
                     // Первое событие — Supabase загрузил сессию из кэша
-                    if session != nil {
-                        let userId = session!.user.id.uuidString.lowercased()
+                    if let session {
+                        let userId = session.user.id.uuidString.lowercased()
                         SupabaseManager.shared.setCurrentUserId(userId)
                         self.state = .main
                     } else {
