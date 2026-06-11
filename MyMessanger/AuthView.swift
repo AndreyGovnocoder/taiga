@@ -22,8 +22,9 @@ struct AuthView: View {
     @State private var isLoginMode: Bool = true
     
     @State private var phoneNumber: String = ""
-    @State private var smsCode: String = ""
-    @State private var isCodeSent: Bool = false
+    // SMS-вход скрыт до реализации серверной отправки кода (см. закомментированные phoneAuthSection/sendSMS/verifyCode ниже):
+    // @State private var smsCode: String = ""
+    // @State private var isCodeSent: Bool = false
     
     @State private var email: String = ""
     @State private var password: String = ""
@@ -48,32 +49,17 @@ struct AuthView: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 20) {
-                    Text("Способ входа")
-                        .font(.subheadline)
-                        .foregroundColor(.gray)
-                    
-                    Picker("Способ входа", selection: $authMethod.animation(.easeInOut)) {
-                        Text("Телефон").tag(AuthMethod.phone)
-                        Text("Почта").tag(AuthMethod.email)
-                    }
-                    
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal)
-                    .padding(.bottom, 10)
-                    
+                    // SMS-вход скрыт до реализации серверной отправки кода (App Store: не показываем нерабочие функции).
+                    // Единственный рабочий способ — email; переключатель способа входа убран.
+
                     Text(headerText)
                         .font(.largeTitle)
                         .fontWeight(.bold)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal)
                     
-                    if authMethod == .phone {
-                        phoneAuthSection
-                            .transition(.move(edge: .leading).combined(with: .opacity))
-                    } else {
-                        emailAuthSection
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
-                    }
+                    emailAuthSection
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                     
                     if isLoading {
                         ProgressView()
@@ -125,13 +111,12 @@ struct AuthView: View {
     }
     
     private var headerText: String {
-        if authMethod == .phone {
-            return isCodeSent ? "Введите код из СМС" : "Ваш телефон"
-        } else {
-            return "Вход по Email"
-        }
+        return "Вход по Email"
     }
     
+    // SMS-вход скрыт для ревью App Store (нет рабочей серверной отправки кода).
+    // Восстановить вместе с requestSMS/verifyCode в SupabaseAuthService, когда появится backend SMS.
+    /*
     private var phoneAuthSection: some View {
         VStack(spacing: 16) {
             if !isCodeSent {
@@ -142,7 +127,7 @@ struct AuthView: View {
                     .background(Color(.systemGray6))
                     .cornerRadius(12)
 
-                
+
                 Button(action: sendSMS) {
                     Text("Получить код")
                         .frame(maxWidth: .infinity)
@@ -152,7 +137,7 @@ struct AuthView: View {
                         .foregroundColor(.white)
                 }
                 .disabled(phoneNumber.count <= 10 || isLoading)
-                
+
             } else {
                 TextField("Код из СМС", text: $smsCode)
                     .keyboardType(.numberPad)
@@ -160,7 +145,7 @@ struct AuthView: View {
                     .padding()
                     .background(Color(.systemGray6))
                     .cornerRadius(12)
-                
+
                 Button(action: verifyCode) {
                     Text("Войти")
                         .frame(maxWidth: .infinity)
@@ -174,6 +159,7 @@ struct AuthView: View {
         }
         .padding(.horizontal)
     }
+    */
     
     private var emailAuthSection: some View {
         VStack(spacing: 16) {
@@ -318,10 +304,12 @@ struct AuthView: View {
         !password.isEmpty && !confirmPassword.isEmpty && password != confirmPassword
     }
     
+    // SMS-вход скрыт для ревью App Store — восстановить вместе с phoneAuthSection, когда появится backend SMS.
+    /*
     private func sendSMS() {
         isLoading = true
         errorMessage = nil
-        
+
         Task {
             do {
                 try await router.authService.requestSMS(phoneNumber: phoneNumber)
@@ -337,11 +325,11 @@ struct AuthView: View {
             }
         }
     }
-    
+
     private func verifyCode() {
         isLoading = true
         errorMessage = nil
-        
+
         Task {
             do {
                 _ = try await router.authService.verifyCode(code: smsCode)
@@ -356,6 +344,7 @@ struct AuthView: View {
             }
         }
     }
+    */
     
     private func submitEmailAuth() {
         isLoading = true

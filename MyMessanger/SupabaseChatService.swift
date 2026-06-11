@@ -1724,11 +1724,11 @@ class SupabaseChatService: ChatServiceProtocol {
     /// - Импорт на новом устройстве через AirDrop / iCloud Drive
     /// - Опциональная автоматическая синхронизация через iCloud (CloudKit)
     func exportChatBackup() async throws {
-        fatalError("TODO: Backup не реализован")
+        throw NSError(domain: "ChatService", code: 501, userInfo: [NSLocalizedDescriptionKey: "Резервное копирование чатов пока не реализовано"])
     }
     
     func importChatBackup(from url: URL) async throws {
-        fatalError("TODO: Backup не реализован")
+        throw NSError(domain: "ChatService", code: 501, userInfo: [NSLocalizedDescriptionKey: "Восстановление чатов из резервной копии пока не реализовано"])
     }
 }
 
