@@ -11,9 +11,12 @@ import Supabase
 final class SupabaseManager: @unchecked Sendable {
     static let shared = SupabaseManager()
     
+    // URL и anon-ключ вынесены в SupabaseConfig (обход блокировок РКН — см. analysis-reports/).
+    // По умолчанию хост = прямой адрес проекта, поэтому поведение идентично прежнему,
+    // пока в SupabaseConfig.hostCandidates не добавлен прокси-домен.
     let client = SupabaseClient(
-        supabaseURL: URL(string: "https://rhoyopwzdqtcyawiipya.supabase.co")!,
-        supabaseKey: "sb_publishable_XKl70ux3zYBIiodYYowweQ_0ERHg6T1",
+        supabaseURL: SupabaseConfig.currentURL,
+        supabaseKey: SupabaseConfig.anonKey,
         options: SupabaseClientOptions(
             auth: SupabaseClientOptions.AuthOptions(
                 emitLocalSessionAsInitialSession: true

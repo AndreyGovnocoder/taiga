@@ -1,0 +1,36 @@
+# Keep-alive для Supabase Free (Вариант Б).
+# Supabase ставит бесплатный проект на паузу после ~7 дней неактивности БД.
+# Этот воркфлоу раз в 3 дня делает запрос, исполняющий SQL на сервере (RPC check_nickname_exists —
+# он доступен анонимному ключу, т.к. вызывается приложением до авторизации при проверке ника),
+# чтобы сбросить таймер авто-паузы.
+#
+# Активируется только после merge в ветку по умолчанию (main) — расписания GitHub Actions
+# запускаются с дефолтной ветки. Можно запустить вручную (workflow_dispatch).
+#
+# anon-ключ публичен по дизайну Supabase (уже в бинаре приложения и в коде) — хранить в secret не обязательно.
+
+name: Supabase keep-alive
+
+on:
+  schedule:
+    - cron: "0 6 */3 * *"   # каждые 3 дня в 06:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Touch Supabase DB (RPC)
+        run: |
+          code=$(curl -sS -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H "apikey: sb_publishable_XKl70ux3zYBIiodYYowweQ_0ERHg6T1" \
+            -H "Content-Type: application/json" \
+            -d '{"p_nickname":"__keepalive_probe__"}' \
+            "https://rhoyopwzdqtcyawiipya.supabase.co/rest/v1/rpc/check_nickname_exists")
+          echo "keep-alive RPC HTTP status: $code"
+          # 2xx — успех; не валим джоб на 4xx (главное — запрос дошёл до БД и сбросил таймер).
+          case "$code" in
+            2*) echo "OK"; ;;
+            *) echo "::warning::Неожиданный статус $code — проверьте, что RPC check_nickname_exists доступен анониму"; ;;
+          esac
