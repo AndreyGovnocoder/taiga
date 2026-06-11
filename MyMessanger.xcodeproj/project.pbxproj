@@ -6,13 +6,31 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		DF4D63462F604B7F009E4AC4 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = DF4D63452F604B7F009E4AC4 /* Supabase */; };
+		DFA18F582F6EDC6F008D47F4 /* MessagingUI in Frameworks */ = {isa = PBXBuildFile; productRef = DFA18F572F6EDC6F008D47F4 /* MessagingUI */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		DF4D62F92F5ED4B5009E4AC4 /* MyMessanger.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MyMessanger.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		DFA18EF52F6ADC11008D47F4 /* Exceptions for "MyMessanger" folder in "MyMessanger" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = DF4D62F82F5ED4B5009E4AC4 /* MyMessanger */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		DF4D62FB2F5ED4B5009E4AC4 /* MyMessanger */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				DFA18EF52F6ADC11008D47F4 /* Exceptions for "MyMessanger" folder in "MyMessanger" target */,
+			);
 			path = MyMessanger;
 			sourceTree = "<group>";
 		};
@@ -23,6 +41,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				DF4D63462F604B7F009E4AC4 /* Supabase in Frameworks */,
+				DFA18F582F6EDC6F008D47F4 /* MessagingUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -33,6 +53,7 @@
 			isa = PBXGroup;
 			children = (
 				DF4D62FB2F5ED4B5009E4AC4 /* MyMessanger */,
+				DF4D63442F604B7F009E4AC4 /* Frameworks */,
 				DF4D62FA2F5ED4B5009E4AC4 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -43,6 +64,13 @@
 				DF4D62F92F5ED4B5009E4AC4 /* MyMessanger.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		DF4D63442F604B7F009E4AC4 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -65,6 +93,8 @@
 			);
 			name = MyMessanger;
 			packageProductDependencies = (
+				DF4D63452F604B7F009E4AC4 /* Supabase */,
+				DFA18F572F6EDC6F008D47F4 /* MessagingUI */,
 			);
 			productName = MyMessanger;
 			productReference = DF4D62F92F5ED4B5009E4AC4 /* MyMessanger.app */;
@@ -86,14 +116,18 @@
 				};
 			};
 			buildConfigurationList = DF4D62F42F5ED4B5009E4AC4 /* Build configuration list for PBXProject "MyMessanger" */;
-			developmentRegion = en;
+			developmentRegion = ru;
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
-				Base,
+				ru,
 			);
 			mainGroup = DF4D62F02F5ED4B5009E4AC4;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				DF4D63402F6047CE009E4AC4 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+				DFA18F562F6EDC6F008D47F4 /* XCRemoteSwiftPackageReference "swiftui-messaging-ui" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = DF4D62FA2F5ED4B5009E4AC4 /* Products */;
 			projectDirPath = "";
@@ -251,16 +285,23 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = MyMessanger/MyMessanger.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = G5ND9FDTDB;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MyMessanger/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Taiga;
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Приложению нужен доступ к камере для отправки фото и видео в Тайге";
+				INFOPLIST_KEY_NSContactsUsageDescription = "Приложению нужен доступ к контактам, чтобы найти ваших друзей в Тайге";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -283,16 +324,23 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = MyMessanger/MyMessanger.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = G5ND9FDTDB;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MyMessanger/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Taiga;
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Приложению нужен доступ к камере для отправки фото и видео в Тайге";
+				INFOPLIST_KEY_NSContactsUsageDescription = "Приложению нужен доступ к контактам, чтобы найти ваших друзей в Тайге";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -332,6 +380,38 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		DF4D63402F6047CE009E4AC4 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.5.1;
+			};
+		};
+		DFA18F562F6EDC6F008D47F4 /* XCRemoteSwiftPackageReference "swiftui-messaging-ui" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/FluidGroup/swiftui-messaging-ui";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.5.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		DF4D63452F604B7F009E4AC4 /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DF4D63402F6047CE009E4AC4 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+		DFA18F572F6EDC6F008D47F4 /* MessagingUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DFA18F562F6EDC6F008D47F4 /* XCRemoteSwiftPackageReference "swiftui-messaging-ui" */;
+			productName = MessagingUI;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = DF4D62F12F5ED4B5009E4AC4 /* Project object */;
 }
