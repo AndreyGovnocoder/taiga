@@ -31,7 +31,9 @@ class ContentViewModel {
     private var newMessageSubscription: AnyCancellable?
     private var newChatSubscription: AnyCancellable?
     private var globalSubscriptionTask: Task<Void, Never>?
-    
+    /// Combine-наблюдатели настраиваются один раз (не пересоздаются на каждый рестарт подписки).
+    private var observersConfigured = false
+
     init(chatService: ChatServiceProtocol? = nil) {
         self.chatService = chatService ?? SupabaseChatService()
     }
@@ -103,15 +105,49 @@ class ContentViewModel {
         }
     }
 
+    /// ЕДИНЫЙ владелец глобальной realtime-подписки. Все триггеры — первичный показ,
+    /// пробуждение (appWakeUpTrigger), обнаружение нового чата — идут СЮДА. Раньше было
+    /// ДВА независимых запускателя (`.task(id:)` в ContentView + restartGlobalSubscription),
+    /// что поднимало второй `client.channel("global_messages")` → дубль INSERT-хендлеров →
+    /// самоусиливающийся цикл рестартов. Теперь — одна `globalSubscriptionTask`.
+    ///
+    /// Бездедлочно: старую задачу отменяем и НЕ ждём её `.value`. На мёртвом сокете teardown
+    /// канала (#4, `unsubscribe` без таймаута в SDK) мог бы зависнуть — ожидание привело бы
+    /// к дедлоку, поэтому новая подписка стартует, не дожидаясь завершения старой.
     @MainActor
-    func startGlobalSubscription(context: ModelContext) async {
+    func ensureGlobalSubscription(context: ModelContext) {
+        setupObservers(context: context)
+
+        globalSubscriptionTask?.cancel()
+        globalSubscriptionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            // Переподключаем realtime (WebSocket мог умереть во сне)
+            await self.chatService.reconnectRealtime()
+            if Task.isCancelled { return }
+            do {
+                try await self.chatService.subscribeToAllChats(container: context.container)
+            } catch is CancellationError {
+                print("СЕРВЕР: Глобальная подписка остановлена")
+            } catch {
+                print("СЕРВЕР: Ошибка глобальной подписки: \(error)")
+            }
+        }
+    }
+
+    /// Настраивает Combine-наблюдатели ОДИН раз. Раньше пересоздавались на каждый рестарт
+    /// подписки (внутри startGlobalSubscription) — лишняя работа и источник путаницы владения.
+    @MainActor
+    private func setupObservers(context: ModelContext) {
+        guard !observersConfigured else { return }
+        observersConfigured = true
+
         // 1. Собственные save на main context
         dbSubscription = NotificationCenter.default.publisher(for: ModelContext.didSave, object: nil)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.reloadLocal(context: context)
             }
-        
+
         // 2. Входящие сообщения от DatabaseService actor
         // Задержка 0.3с даёт SQLite время записать данные, чтобы main context их увидел
         newMessageSubscription = NotificationCenter.default.publisher(for: .newMessageSaved)
@@ -121,8 +157,9 @@ class ContentViewModel {
                     self?.reloadLocal(context: context)
                 }
             }
-        
+
         // 3. Обнаружен новый чат — перезагружаем с сервера и переподписываемся
+        //    через ТОТ ЖЕ единый владелец (не отдельный restart).
         newChatSubscription = NotificationCenter.default.publisher(for: .newChatDetected)
             .receive(on: RunLoop.main)
             .debounce(for: .seconds(1), scheduler: RunLoop.main)
@@ -130,29 +167,21 @@ class ContentViewModel {
                 guard let self else { return }
                 Task { @MainActor in
                     await self.loadChats(context: context, showLoadingIndicator: false)
-                    self.restartGlobalSubscription(context: context)
+                    self.ensureGlobalSubscription(context: context)
                 }
             }
-        
-        // 4. Переподключаем realtime (WebSocket мог умереть во сне)
-        await chatService.reconnectRealtime()
-        
-        do {
-            try await chatService.subscribeToAllChats(container: context.container)
-        } catch is CancellationError {
-            print("СЕРВЕР: Глобальная подписка остановлена")
-        } catch {
-            print("СЕРВЕР: Ошибка глобальной подписки: \(error)")
-        }
     }
-    
-    /// Перезапуск глобальной подписки (после появления нового чата)
+
+    /// Останавливает подписку и гасит наблюдателей (при выходе/смене аккаунта), чтобы
+    /// осиротевший Task не писал в shared mainContext по данным прошлого пользователя.
     @MainActor
-    func restartGlobalSubscription(context: ModelContext) {
+    func stopGlobalSubscription() {
         globalSubscriptionTask?.cancel()
-        globalSubscriptionTask = Task {
-            await startGlobalSubscription(context: context)
-        }
+        globalSubscriptionTask = nil
+        dbSubscription = nil
+        newMessageSubscription = nil
+        newChatSubscription = nil
+        observersConfigured = false
     }
     
     @MainActor

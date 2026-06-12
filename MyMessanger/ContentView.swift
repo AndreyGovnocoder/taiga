@@ -179,6 +179,7 @@ struct ContentView: View
 
             .task {
                 await viewModel.loadChats(context: context, showLoadingIndicator: true)
+                viewModel.ensureGlobalSubscription(context: context)
             }
         }
         .onChange(of: router.appWakeUpTrigger) { _, _ in
@@ -186,9 +187,16 @@ struct ContentView: View
             Task {
                 await viewModel.loadChats(context: context, showLoadingIndicator: false)
             }
+            // Переподписка через единого владельца (раньше это делал отдельный .task(id:)).
+            viewModel.ensureGlobalSubscription(context: context)
         }
-        .task(id: router.appWakeUpTrigger) {
-            await viewModel.startGlobalSubscription(context: context)
+        .onChange(of: router.state) { _, newState in
+            // Выход/смена аккаунта (state != .main): гасим подписку и наблюдателей,
+            // чтобы осиротевший Task не писал в shared mainContext. Навигация в чат
+            // НЕ меняет router.state (остаётся .main) → подписка не рвётся.
+            if newState != .main {
+                viewModel.stopGlobalSubscription()
+            }
         }
     }
     
