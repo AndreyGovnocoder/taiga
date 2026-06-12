@@ -47,6 +47,7 @@ struct RootView: View {
             if newPhase == .active {
                 print("СЕРВЕР: Корень поймал пробуждение! Даем сигнал всем экранам!")
                 router.appWakeUpTrigger += 1
+                print("DIAG appWakeUpTrigger -> \(router.appWakeUpTrigger) phase=.active t=\(Date().timeIntervalSince1970)")
             }
         }
     }

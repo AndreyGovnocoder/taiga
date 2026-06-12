@@ -20,9 +20,29 @@ final class SupabaseManager: @unchecked Sendable {
         options: SupabaseClientOptions(
             auth: SupabaseClientOptions.AuthOptions(
                 emitLocalSessionAsInitialSession: true
+            ),
+            global: SupabaseClientOptions.GlobalOptions(
+                session: SupabaseManager.makeHTTPSession()
             )
         )
     )
+
+    /// Свой URLSession для HTTP-запросов Supabase (PostgREST / Auth / Storage / Functions).
+    /// Realtime использует ОТДЕЛЬНЫЙ WebSocket-транспорт (RealtimeClientV2.connectionManager),
+    /// поэтому этот таймаут на realtime НЕ влияет (проверено по докам supabase-swift).
+    ///
+    /// Зачем: дефолтный URLSession ждёт запрос до 60с по бездействию и до 7 суток на ресурс.
+    /// На iOS-эмуляторе соединение к Supabase (Cloudflare, HTTP/3-QUIC) часто полузависает —
+    /// запрос не завершается и не падает быстро → loadChats не доходит до isLoading=false →
+    /// бесконечный спиннер «Обновление...». Жёсткий таймаут превращает зависание в быструю
+    /// ошибку, которую перехватывает авто-retry в loadChats / оверлей «Повторить».
+    private static func makeHTTPSession() -> URLSession {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 20    // по бездействию: stall → ошибка через 20с
+        config.timeoutIntervalForResource = 120  // общий потолок на запрос (аплоады стримят данные кусками)
+        config.waitsForConnectivity = false      // не ждать сеть молча — пусть падает, отработает retry
+        return URLSession(configuration: config)
+    }
     
     // MARK: - Единый source of truth для ID текущего пользователя
     

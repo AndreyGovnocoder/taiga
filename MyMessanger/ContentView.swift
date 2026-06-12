@@ -160,6 +160,7 @@ struct ContentView: View
                 SettingsView()
             }
             .onChange(of: viewModel.isLoading) { oldValue, newValue in
+                print("DIAG isLoading \(oldValue) -> \(newValue) t=\(Date().timeIntervalSince1970)")
                 if newValue {
                     syncStatusTask?.cancel()
                     withAnimation { showSyncStatus = true }
