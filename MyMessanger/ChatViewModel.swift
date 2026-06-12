@@ -100,14 +100,33 @@ final class ChatViewModel {
         // 2. Фоновый retry недоставленных
         await chatService.retryPendingMessages(context: context)
         
-        // 3. Фоновая подгрузка свежих данных с сервера
-        let fetchedCount = (try? await chatService.fetchMessages(
-            for: chat.id,
-            limit: pageSize,
-            before: nil,
-            context: context
-        )) ?? 0
-        
+        // 3. Фоновая подгрузка свежих данных с сервера — с авто-retry на ТРАНЗИЕНТНЫХ
+        //    сетевых сбоях (флапающая/throttled сеть, таймаут по полузависшему сокету).
+        //    fetchMessages идемпотентен (dedup по id) → повтор безопасен. Best-effort:
+        //    после исчерпания попыток показываем локальные сообщения (isInitialLoading снимется ниже).
+        var fetchedCount = 0
+        var attempt = 1
+        while true {
+            do {
+                fetchedCount = try await chatService.fetchMessages(
+                    for: chat.id,
+                    limit: pageSize,
+                    before: nil,
+                    context: context
+                )
+                break
+            } catch {
+                if error.isTransientNetwork && attempt < 3 && !Task.isCancelled {
+                    print("CHAT: Повтор загрузки сообщений после сетевого сбоя (попытка \(attempt))")
+                    attempt += 1
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    continue
+                }
+                print("CHAT: Не удалось загрузить сообщения: \(error.localizedDescription)")
+                break
+            }
+        }
+
         hasMoreOnServer = fetchedCount >= pageSize
         
         // 4. Добавляем новые, если пришли

@@ -67,7 +67,7 @@ class ContentViewModel {
                     _ = try await chatService.fetchChats(context: context)
                     break
                 } catch {
-                    if Self.isTransientNetworkError(error) && attempt < 3 && !Task.isCancelled {
+                    if error.isTransientNetwork && attempt < 3 && !Task.isCancelled {
                         print("СЕРВЕР: Повтор загрузки чатов после сетевого сбоя (попытка \(attempt))")
                         attempt += 1
                         try? await Task.sleep(nanoseconds: 500_000_000)
@@ -103,25 +103,6 @@ class ContentViewModel {
         }
     }
 
-    /// Транзиентные сетевые сбои, на которых имеет смысл повторить запрос.
-    /// -1005 (потеря соединения) типичен для первого запроса по «мёртвому»/QUIC-сокету эмулятора;
-    /// повтор по свежему соединению (с откатом на HTTP/2) обычно проходит. Таймаут (-1001)
-    /// прилетает от нашего URLSession при зависании запроса (см. SupabaseManager.makeHTTPSession).
-    static func isTransientNetworkError(_ error: Error) -> Bool {
-        let ns = error as NSError
-        guard ns.domain == NSURLErrorDomain else { return false }
-        switch ns.code {
-        case NSURLErrorNetworkConnectionLost,   // -1005
-             NSURLErrorTimedOut,                 // -1001
-             NSURLErrorCannotConnectToHost,      // -1004
-             NSURLErrorCannotFindHost,           // -1003
-             NSURLErrorNotConnectedToInternet:   // -1009
-            return true
-        default:
-            return false
-        }
-    }
-    
     @MainActor
     func startGlobalSubscription(context: ModelContext) async {
         // 1. Собственные save на main context
