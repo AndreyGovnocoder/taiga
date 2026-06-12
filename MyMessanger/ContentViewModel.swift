@@ -38,7 +38,6 @@ class ContentViewModel {
     
     @MainActor
     func loadChats(context: ModelContext, showLoadingIndicator: Bool = true) async {
-        print("DIAG loadChats ENTER t=\(Date().timeIntervalSince1970) show=\(showLoadingIndicator) chatsEmpty=\(self.chats.isEmpty) isLoading=\(self.isLoading)")
         // 1. МГНОВЕННО рендерим локальные чаты!
         self.reloadLocal(context: context)
 
@@ -46,30 +45,22 @@ class ContentViewModel {
         if showLoadingIndicator && self.chats.isEmpty {
             self.isLoading = true
             self.errorMessage = nil
-            print("DIAG loadChats SET isLoading=true t=\(Date().timeIntervalSince1970)")
         }
 
         // 3. Пытаемся ретраить старые отправки
-        print("DIAG STEP1 retryPending START t=\(Date().timeIntervalSince1970)")
         await chatService.retryPendingMessages(context: context)
-        print("DIAG STEP1 retryPending DONE t=\(Date().timeIntervalSince1970)")
 
         do {
             // 0. UGC-модерация: обновляем набор заблокированных (для фильтрации чатов/сообщений/контактов).
             //    try? — сбой модерации не должен ломать загрузку чатов.
-            print("DIAG STEP2 fetchBlocked START t=\(Date().timeIntervalSince1970)")
             _ = try? await chatService.fetchBlockedUsers()
-            print("DIAG STEP2 fetchBlocked DONE t=\(Date().timeIntervalSince1970)")
 
             // 4. Синхронизируем пропущенные events (удаления/редактирования) перед загрузкой чатов
-            print("DIAG STEP3 syncEvents START t=\(Date().timeIntervalSince1970)")
             try? await chatService.syncMessageEvents(context: context)
-            print("DIAG STEP3 syncEvents DONE t=\(Date().timeIntervalSince1970)")
 
             // 5. Загружаем свежие данные о чатах с сервера — с авто-retry на ТРАНЗИЕНТНЫХ
-            //    сетевых сбоях (эмулятор: -1005/таймаут по полузависшему QUIC-сокету).
+            //    сетевых сбоях (флапающая/throttled сеть, таймаут по полузависшему сокету).
             //    fetchChats идемпотентен (зовётся на каждый refresh) → повтор безопасен.
-            print("DIAG STEP4 fetchChats START t=\(Date().timeIntervalSince1970)")
             var attempt = 1
             while true {
                 do {
@@ -77,7 +68,7 @@ class ContentViewModel {
                     break
                 } catch {
                     if Self.isTransientNetworkError(error) && attempt < 3 && !Task.isCancelled {
-                        print("DIAG STEP4 fetchChats RETRY #\(attempt) после \(error) t=\(Date().timeIntervalSince1970)")
+                        print("СЕРВЕР: Повтор загрузки чатов после сетевого сбоя (попытка \(attempt))")
                         attempt += 1
                         try? await Task.sleep(nanoseconds: 500_000_000)
                         continue
@@ -85,12 +76,10 @@ class ContentViewModel {
                     throw error
                 }
             }
-            print("DIAG STEP4 fetchChats DONE t=\(Date().timeIntervalSince1970)")
 
             // Отмена (исчезновение вью / прерванный свайп): выходим, но СБРАСЫВАЕМ индикатор.
             // Раньше здесь был `return` без isLoading=false → спиннер залипал навсегда.
             if Task.isCancelled {
-                print("DIAG loadChats EARLY-RETURN(cancelled) сбрасываю isLoading t=\(Date().timeIntervalSince1970)")
                 self.isLoading = false
                 return
             }
@@ -101,19 +90,16 @@ class ContentViewModel {
             withAnimation {
                 self.isLoading = false
             }
-            print("DIAG loadChats EXIT-SUCCESS isLoading=false t=\(Date().timeIntervalSince1970)")
         } catch {
             if Task.isCancelled || (error as NSError).code == URLError.cancelled.rawValue {
                 print("СЕРВЕР: Загрузка чатов отменена (прерванный свайп). Игнорируем ошибку")
                 withAnimation { self.isLoading = false }
-                print("DIAG loadChats EXIT-CANCELLED-CATCH isLoading=false t=\(Date().timeIntervalSince1970)")
                 return
             }
 
             print("Ошибка загрузки чатов: \(error)")
             self.errorMessage = "Не удалось загрузить чаты"
             self.isLoading = false
-            print("DIAG loadChats EXIT-ERROR isLoading=false err=\(error) t=\(Date().timeIntervalSince1970)")
         }
     }
 

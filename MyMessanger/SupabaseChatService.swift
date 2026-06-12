@@ -29,7 +29,6 @@ class SupabaseChatService: ChatServiceProtocol {
         let myUserId = session.user.id
         
         print("СЕРВЕР: Мой реальный ID: \(myUserId.uuidString.lowercased())")
-        print("DIAG fetchChats AUTH-SESSION DONE, запрашиваю chat_participants t=\(Date().timeIntervalSince1970)")
 
         let myParticipants: [ChatParticipantDTO] = try await client
             .from("chat_participants")
@@ -38,7 +37,6 @@ class SupabaseChatService: ChatServiceProtocol {
             .execute()
             .value
 
-        print("DIAG fetchChats chat_participants DONE t=\(Date().timeIntervalSince1970)")
         print("СЕРВЕР: Найдено чатов для меня: \(myParticipants.count)")
         
         let chatIds = myParticipants.map { $0.chat_id }
