@@ -227,18 +227,29 @@ final class ChatViewModel {
         guard !text.isEmpty else { return }
         
         let replyId = replyToMessage?.id
+        let savedReply = replyToMessage
         inputText = ""
         replyToMessage = nil
-        
+
         // Фаза 1: мгновенная вставка (даже для draft — отобразится со статусом 🕐)
         let localChatId = chat.id
-        guard let messageId = try? chatService.insertLocalMessage(
-            chatId: localChatId,
-            content: .text(text),
-            replyToMessageId: replyId,
-            threadRootId: nil,
-            context: context
-        ) else { return }
+        let messageId: String
+        do {
+            messageId = try chatService.insertLocalMessage(
+                chatId: localChatId,
+                content: .text(text),
+                replyToMessageId: replyId,
+                threadRootId: nil,
+                context: context
+            )
+        } catch {
+            // Локальная вставка не должна молча терять текст: возвращаем ввод и reply,
+            // чтобы пользователь увидел сообщение в поле и мог отправить повторно.
+            print("SEND: Не удалось создать сообщение локально: \(error.localizedDescription)")
+            inputText = text
+            replyToMessage = savedReply
+            return
+        }
         
         // Обновляем окно — сообщение видно мгновенно
         let newTotal = countLocalMessages()
