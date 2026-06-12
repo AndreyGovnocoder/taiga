@@ -66,6 +66,9 @@ final class SupabaseManager: @unchecked Sendable {
             // Курсор синхронизации событий: локальный кэш стирается при logout, курсор должен
             // начать с нуля для нового пользователя.
             UserDefaults.standard.removeObject(forKey: "lastEventSyncDate")
+            // Disk/memory-кэш аватаров и медиа: чистим, чтобы файлы прошлого пользователя
+            // не оставались на устройстве (приватность). Best-effort — LocalCache actor-изолирован.
+            Task { await LocalCache.shared.clearAll() }
         }
     }
 

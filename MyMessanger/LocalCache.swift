@@ -153,6 +153,26 @@ actor LocalCache {
         }
     }
     
+    /// Полная очистка кэша (L1 memory + L2 disk). Вызывается при logout / удалении аккаунта,
+    /// чтобы кэшированные аватары и медиа прошлого пользователя не оставались на устройстве
+    /// (приватность: следующий пользователь на этом устройстве не должен их видеть).
+    func clearAll() {
+        memoryCache.removeAllObjects()
+
+        let fileManager = FileManager.default
+        guard let fileURLs = try? fileManager.contentsOfDirectory(
+            at: cacheDirectory,
+            includingPropertiesForKeys: nil,
+            options: .skipsHiddenFiles
+        ) else { return }
+
+        var removed = 0
+        for url in fileURLs {
+            if (try? fileManager.removeItem(at: url)) != nil { removed += 1 }
+        }
+        print("СЕРВЕР: Локальный кэш очищен при выходе/удалении (\(removed) файлов)")
+    }
+
     /// Общий размер disk-кэша в байтах
     func totalDiskCacheSize() -> Int64 {
         let fileManager = FileManager.default
