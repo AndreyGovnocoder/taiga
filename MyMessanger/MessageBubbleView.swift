@@ -389,6 +389,10 @@ struct AnimatableMessageCellWrapper<Content: View>: View {
         Text(text)
             .font(.body)
             .foregroundStyle(item.isCurrentUser ? .white : .primary)
+            // fixedSize: тело-Text — сосед цитаты/заголовка ветки в VStack. TiledView меряет
+            // высоту ячейки через systemLayoutSizeFitting (compressed), и без этого многострочный
+            // текст ответа недосчитывается по высоте и усекается «...». См. примеры MessagingUI.
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
     }
@@ -443,6 +447,7 @@ struct AnimatableMessageCellWrapper<Content: View>: View {
                 Text(caption)
                     .font(.body)
                     .foregroundStyle(item.isCurrentUser ? .white : .primary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 10)
                     .padding(.top, 4)
                     .padding(.bottom, 6)

@@ -428,6 +428,10 @@ struct ThreadMessageCell: TiledCellContent {
                             Text(text)
                                 .font(.body)
                                 .foregroundStyle(item.isCurrentUser ? .white : .primary)
+                                // fixedSize: тело-Text — сосед цитаты в VStack. TiledView меряет высоту
+                                // ячейки сжатием (systemLayoutSizeFitting), иначе многострочный ответ
+                                // недосчитывается и усекается «...». См. MessageBubbleView.textContent.
+                                .fixedSize(horizontal: false, vertical: true)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 8)
                         case .image(let imageURL, let thumbURL, let caption, let width, let height, let blurHash):
@@ -469,6 +473,7 @@ struct ThreadMessageCell: TiledCellContent {
                                     Text(caption)
                                         .font(.body)
                                         .foregroundStyle(item.isCurrentUser ? .white : .primary)
+                                        .fixedSize(horizontal: false, vertical: true)
                                         .padding(.horizontal, 10)
                                         .padding(.top, 4)
                                         .padding(.bottom, 6)
