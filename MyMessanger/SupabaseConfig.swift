@@ -48,7 +48,7 @@ enum SupabaseConfig {
     /// Текущий выбранный хост. По умолчанию — первый кандидат.
     /// Сохранённое значение игнорируется, если его больше нет в списке кандидатов
     /// (например, после удаления прокси-домена из конфига).
-    static var chosenHost: String {
+    nonisolated static var chosenHost: String {
         get {
             if let saved = UserDefaults.standard.string(forKey: chosenHostKey),
                hostCandidates.contains(saved) {
@@ -70,14 +70,14 @@ enum SupabaseConfig {
     // MARK: - Переписывание абсолютных медиа-URL на текущий хост
 
     /// «Наши» хосты, чьи абсолютные URL нужно вести через текущий выбранный хост.
-    private static var knownOwnHosts: Set<String> { Set((hostCandidates + [directHost]).map { $0.lowercased() }) }
+    nonisolated private static var knownOwnHosts: Set<String> { Set((hostCandidates + [directHost]).map { $0.lowercased() }) }
 
     /// Переписывает host у абсолютного Supabase-URL (storage/медиа/аватары) на текущий `chosenHost`.
     /// Зачем: медиа-URL хранятся в БД абсолютными (getPublicURL().absoluteString) — старые записи
     /// содержат прямой хост Supabase, заблокированный в РФ. Эта функция ведёт старые и будущие
     /// ссылки через прокси и делает их устойчивыми к смене VPS. Чужие URL не трогает; Caddy
     /// проксирует путь как есть — меняется только host.
-    static func rewrittenToCurrentHost(_ url: URL) -> URL {
+    nonisolated static func rewrittenToCurrentHost(_ url: URL) -> URL {
         guard let rawHost = url.host else { return url }
         let host = rawHost.lowercased()
         guard host != chosenHost.lowercased(), knownOwnHosts.contains(host) else { return url }
@@ -87,7 +87,7 @@ enum SupabaseConfig {
     }
 
     /// Обёртка для строкового URL-поля из БД (avatar_url / image_url). nil — если строка пустая/битая.
-    static func rewrittenURL(fromStored string: String?) -> URL? {
+    nonisolated static func rewrittenURL(fromStored string: String?) -> URL? {
         guard let string = string, let url = URL(string: string) else { return nil }
         return rewrittenToCurrentHost(url)
     }

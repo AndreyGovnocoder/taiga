@@ -1614,7 +1614,7 @@ class SupabaseChatService: ChatServiceProtocol {
         // Явное открытие из Контактов = «снять удаление»: если чат ранее удаляли (deleted_at) и
         // новых сообщений не было, fetchChats иначе пропустил бы его → 404. Снимаем deleted_at на
         // сервере (cleared_at сохраняется — история остаётся очищенной, чат открывается пустым).
-        try? await client
+        _ = try? await client
             .rpc("undelete_chat", params: ["p_chat_id": chatId.uuidString.lowercased()])
             .execute()
 

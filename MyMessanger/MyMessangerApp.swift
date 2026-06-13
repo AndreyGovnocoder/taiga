@@ -59,16 +59,26 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     // fetchChats/realtime). BEST-EFFORT: пуш alert-типа (content-available:1), фоновую побудку
     // iOS даёт оппортунистически и может троттлить → УМЕНЬШАЕТ задержку, но не гарантирует её
     // отсутствие на 100%. Детерминированный вариант — Notification Service Extension (отдельно).
-    // @MainActor (по умолчанию, как willPresent): пишем в mainContext без хопов.
-    func application(_ application: UIApplication,
-                     didReceiveRemoteNotification userInfo: [AnyHashable: Any]) async -> UIBackgroundFetchResult {
+    // nonisolated: из non-Sendable userInfo вытаскиваем только message_id (String, Sendable) в
+    // неизолированном контексте, затем хоп на MainActor для записи в mainContext. Иначе non-Sendable
+    // [AnyHashable: Any] «пересекает» границу актора при заходе в MainActor-реализацию (ошибка в
+    // Swift 6 mode). Сама запись в SwiftData-контекст по-прежнему идёт на MainActor (см. хелпер).
+    nonisolated func application(_ application: UIApplication,
+                                 didReceiveRemoteNotification userInfo: [AnyHashable: Any]) async -> UIBackgroundFetchResult {
         guard let messageIdStr = userInfo["message_id"] as? String,
-              UUID(uuidString: messageIdStr) != nil,
-              let container = AppDelegate.sharedModelContainer else {
+              UUID(uuidString: messageIdStr) != nil else {
             return .noData
         }
+        return await AppDelegate.handlePushFetch(messageId: messageIdStr)
+    }
+
+    // Запись по пушу в общий mainContext — на MainActor (как и раньше, без межпоточных хопов по
+    // самому SwiftData-контексту). Принимает уже извлечённый Sendable-String, не non-Sendable dict.
+    @MainActor
+    private static func handlePushFetch(messageId: String) async -> UIBackgroundFetchResult {
+        guard let container = AppDelegate.sharedModelContainer else { return .noData }
         do {
-            let inserted = try await SupabaseChatService().fetchAndStoreMessage(messageId: messageIdStr, container: container)
+            let inserted = try await SupabaseChatService().fetchAndStoreMessage(messageId: messageId, container: container)
             return inserted ? .newData : .noData
         } catch {
             print("СЕРВЕР: Не удалось дотянуть сообщение по пушу: \(error.localizedDescription)")
@@ -151,26 +161,38 @@ struct MyMessangerApp: App {
     }
 
     var sharedModelContainer: ModelContainer = {
-        // Версионированная схема (база миграций). Сегодня no-op относительно прежней
-        // Schema([...]) тех же моделей — формат хранения не меняется. Будущие правки @Model
-        // добавляются как SchemaV2 + MigrationStage (мигрируемо, без потери локального кэша).
+        // Текущая схема (V2). Новые поля V2 (avatarURLFull, clearedAt, deletedAt) — аддитивные
+        // ОПЦИОНАЛЬНЫЕ, поэтому SwiftData выполняет авто-lightweight-миграцию со старого (V1)
+        // store БЕЗ потери локального кэша и БЕЗ явного SchemaMigrationPlan. Явный план УБРАН:
+        // он содержал [V1, V2], где обе версии ссылались на одни и те же живые @Model-классы →
+        // одинаковый checksum → SwiftData падал при старте с ObjC-исключением
+        // "Duplicate version checksums across stages detected." Будущие BREAKING-правки
+        // (переименования, смена типов, enum-кейсы MessageContent/ChatType) добавлять как новую
+        // VersionedSchema с СОБСТВЕННЫМИ снапшотами моделей + .custom-стадия (и проверять на Mac
+        // против реального store — снапшот старой версии обязан точно воспроизвести её checksum).
         let schema = Schema(versionedSchema: MessageSchemaV2.self)
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
         do {
-            return try ModelContainer(for: schema, migrationPlan: MessageMigrationPlan.self, configurations: [modelConfiguration])
+            return try ModelContainer(for: schema, configurations: [modelConfiguration])
         } catch {
-            // Последний рубеж: повреждение/несовместимая миграция не должны делать запуск
-            // невозможным. Логируем причину ДО сброса (иначе кэш теряется молча), затем
-            // пересоздаём пустую БД (данные — кэш сервера, восстановимы при следующей синхронизации).
-            print("SwiftData: ⚠️ Не удалось открыть хранилище (\(error)). Сбрасываем локальный кэш и пересоздаём БД.")
+            // Последний рубеж для ВОССТАНОВИМЫХ Swift-ошибок (повреждение файла, провал реальной
+            // миграции). NB: дубль-checksum миграции прилетает как ObjC NSException и сюда НЕ
+            // попадает (Swift do/catch его не ловит). Чтобы НЕ терять локальный кэш молча — не
+            // удаляем store, а ПЕРЕИМЕНОВЫВАЕМ в .backup (восстановимо/диагностируемо) и логируем
+            // причину; данные всё равно кэш сервера и доедут при следующей синхронизации.
+            print("SwiftData: ⚠️ Не удалось открыть хранилище (\(error)). Сохраняю повреждённый store в .backup и пересоздаю БД.")
             let storeURL = modelConfiguration.url
-            try? FileManager.default.removeItem(at: storeURL)
-            try? FileManager.default.removeItem(at: storeURL.deletingPathExtension().appendingPathExtension("sqlite-shm"))
-            try? FileManager.default.removeItem(at: storeURL.deletingPathExtension().appendingPathExtension("sqlite-wal"))
+            let shmURL = storeURL.deletingPathExtension().appendingPathExtension("sqlite-shm")
+            let walURL = storeURL.deletingPathExtension().appendingPathExtension("sqlite-wal")
+            for url in [storeURL, shmURL, walURL] where FileManager.default.fileExists(atPath: url.path) {
+                let backupURL = url.appendingPathExtension("backup")
+                try? FileManager.default.removeItem(at: backupURL)        // прежний бэкап, если был
+                try? FileManager.default.moveItem(at: url, to: backupURL)
+            }
 
             do {
-                return try ModelContainer(for: schema, migrationPlan: MessageMigrationPlan.self, configurations: [modelConfiguration])
+                return try ModelContainer(for: schema, configurations: [modelConfiguration])
             } catch {
                 fatalError("Не удалось создать ModelContainer даже после сброса: \(error)")
             }

@@ -48,7 +48,7 @@ struct CameraPicker: UIViewControllerRepresentable {
                 let format = UIGraphicsImageRendererFormat()
                 format.opaque = true
                 format.scale = image.scale
-                let opaqueImage = await UIGraphicsImageRenderer(size: size, format: format).image { _ in
+                let opaqueImage = UIGraphicsImageRenderer(size: size, format: format).image { _ in
                     image.draw(in: CGRect(origin: .zero, size: size))
                 }
                 if let data = opaqueImage.jpegData(compressionQuality: 0.8) {
