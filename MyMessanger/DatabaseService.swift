@@ -54,21 +54,30 @@ class DatabaseService {
                 createdAt: date,
                 status: status
             )
-            
-            modelContext.insert(msgDB)
-            
+
             let chatDesc = FetchDescriptor<ChatDB>(predicate: #Predicate { $0.id == chatId })
-            if let chatDB = try modelContext.fetch(chatDesc).first {
+            let chatDB = try modelContext.fetch(chatDesc).first
+
+            // «Очистить чат»: входящее старше серверной метки очистки не показываем (защита от
+            // гонок ресинка). Нормальные новые сообщения всегда новее метки → показываются и
+            // оживляют удалённый чат (через newChatDetected → fetchChats, last_message_at > deleted_at).
+            if let clearedAt = chatDB?.clearedAt, date <= clearedAt {
+                msgDB.isHiddenLocally = true
+            }
+
+            modelContext.insert(msgDB)
+
+            if let chatDB {
                 chatDB.lastMessageId = msgId
-                // Клиентский инкремент только для НЕ-muted: сервер инкрементит так же
+                // Клиентский инкремент только для НЕ-muted и НЕ скрытых: сервер инкрементит так же
                 // (handle_new_message … and is_muted = false), иначе локальный счётчик/бейдж
                 // разойдётся с серверным unread_count.
-                if senderId != currentUserId && !chatDB.isMuted {
+                if senderId != currentUserId && !chatDB.isMuted && !msgDB.isHiddenLocally {
                     chatDB.unreadCount += 1
                 }
                 chatDB.updateSnapshot(context: modelContext)
             }
-            
+
             try modelContext.save()
             
             print("БД: ✅ Сообщение \(msgId) сохранено! Отправляем .newMessageSaved для \(chatId)")

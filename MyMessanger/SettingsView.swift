@@ -165,7 +165,9 @@ struct SettingsView: View {
                 Task {
                     isCompressing = true
                     if let data = try? await newItem?.loadTransferable(type: Data.self) {
-                        avatarData = await ImageCompressor.shared.generateThumbnailData(from: data, maxPixelSize: 600) ?? data
+                        // «Полная» версия (≤1280px) — из неё updateProfile сделает тумбу (≤256px)
+                        // и зальёт обе. Раньше грузили только 600px → аватар пикселил в профиле.
+                        avatarData = await ImageCompressor.shared.resizeIfNeeded(data: data, maxPixelSize: 1280)
                     }
                     isCompressing = false
                 }

@@ -11,8 +11,11 @@ import UserNotifications
 import Supabase
 
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
-    
-    
+
+    /// Общий ModelContainer (ставится из MyMessangerApp.init) — нужен фоновому обработчику пуша,
+    /// чтобы писать сообщение в ТОТ ЖЕ mainContext, что и UI (второй контейнер открывать нельзя).
+    static var sharedModelContainer: ModelContainer?
+
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions:[UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
         print("AppDelegate: Мессенджер успешно запущен и готов к настройке сервисов!")
@@ -51,28 +54,26 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
     }
     
-    // Современный метод обработки фонового (Silent) пуша
-    nonisolated func application(_ application: UIApplication,
+    // Фоновая дозагрузка по пушу (нюанс №6): кладём сообщение в общий mainContext ещё ДО
+    // открытия приложения, чтобы на форграунде оно уже было локально (не ждать сетевого
+    // fetchChats/realtime). BEST-EFFORT: пуш alert-типа (content-available:1), фоновую побудку
+    // iOS даёт оппортунистически и может троттлить → УМЕНЬШАЕТ задержку, но не гарантирует её
+    // отсутствие на 100%. Детерминированный вариант — Notification Service Extension (отдельно).
+    // @MainActor (по умолчанию, как willPresent): пишем в mainContext без хопов.
+    func application(_ application: UIApplication,
                      didReceiveRemoteNotification userInfo: [AnyHashable: Any]) async -> UIBackgroundFetchResult {
-        
-        print("СЕРВЕР: Получен Silent Push! Приложение разбужено в фоне")
-        
-        // 1. Проверяем, есть ли нужные данные в словаре
-        guard let customPayload = userInfo as? [String: Any],
-              let messageIdStr = customPayload["message_id"] as? String,
-              let _ = UUID(uuidString: messageIdStr) else {
+        guard let messageIdStr = userInfo["message_id"] as? String,
+              UUID(uuidString: messageIdStr) != nil,
+              let container = AppDelegate.sharedModelContainer else {
             return .noData
         }
-        
-        // 2. Инициируем фоновую задачу для ModelActor (DatabaseService)
-        // В реальном проекте мы бы сделали точечный запрос к БД для получения именно этого сообщения,
-        // но так как у тебя уже есть подписка на реалтайм или мы можем дернуть fetchMessages:
-        
-        // ВАЖНО: Возвращаем .newData, чтобы iOS знала, что мы успешно стянули данные
-        // и не пессимизировала нам фоновое время в будущем
-        
-        return .newData
-        
+        do {
+            let inserted = try await SupabaseChatService().fetchAndStoreMessage(messageId: messageIdStr, container: container)
+            return inserted ? .newData : .noData
+        } catch {
+            print("СЕРВЕР: Не удалось дотянуть сообщение по пушу: \(error.localizedDescription)")
+            return .failed
+        }
     }
     
     private func requestNotificationAuthorization(application: UIApplication) {
@@ -143,12 +144,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 @main
 struct MyMessangerApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate: AppDelegate
-    
+
+    init() {
+        // Прокидываем общий контейнер в AppDelegate для фоновой дозагрузки сообщения по пушу.
+        AppDelegate.sharedModelContainer = sharedModelContainer
+    }
+
     var sharedModelContainer: ModelContainer = {
         // Версионированная схема (база миграций). Сегодня no-op относительно прежней
         // Schema([...]) тех же моделей — формат хранения не меняется. Будущие правки @Model
         // добавляются как SchemaV2 + MigrationStage (мигрируемо, без потери локального кэша).
-        let schema = Schema(versionedSchema: MessageSchemaV1.self)
+        let schema = Schema(versionedSchema: MessageSchemaV2.self)
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
         do {

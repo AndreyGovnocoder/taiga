@@ -4,9 +4,9 @@
 
 ## Таблицы (public) и колонки
 
-- **users**: `id`(uuid, =auth.uid), `phone_number`(text?), `name`(text), `nickname`(text?), `avatar_url`(text?), `is_online`(bool, def false), `apns_token`(text?), `created_at`.
+- **users**: `id`(uuid, =auth.uid), `phone_number`(text?), `name`(text), `nickname`(text?), `avatar_url`(text?, тумба), `avatar_url_full`(text?, полный аватар — профиль/fullscreen; см. `security/chat-clear-delete-and-avatar-full.sql`), `is_online`(bool, def false), `apns_token`(text?), `created_at`.
 - **chats**: `id`(uuid, gen_random_uuid), `type`(text), `name`(text?), `avatar_url`(text?), `created_at`, `last_message_id`(uuid?), `last_message_text`, `last_message_at`, `last_message_sender_id`, `last_message_type`(def 'text') — денормализованный snapshot.
-- **chat_participants**: `chat_id`, `user_id`, `unread_count`(int, def 0), `role`(text, def 'member'), `is_muted`(bool, def false).
+- **chat_participants**: `chat_id`, `user_id`, `unread_count`(int, def 0), `role`(text, def 'member'), `is_muted`(bool, def false), `cleared_at`(timestamptz?, метка «очистить чат»), `deleted_at`(timestamptz?, метка «удалить чат»). См. `security/chat-clear-delete-and-avatar-full.sql`.
 - **messages**: `id`, `chat_id`, `sender_id`, `content_type`, `content_text?`, `content_image_url?`, `content_thumb_url?`, `content_blur_hash?`, `image_width/height`(numeric?), `status`(def 'sent'), `reply_to_message_id?`, `thread_root_id?`, `expires_at?`(TTL), `created_at`.
 - **message_events**: `id`, `chat_id`, `message_id`, `event_type`, `new_text?`, `actor_id`, `created_at`.
 
@@ -36,6 +36,7 @@
 - `remove_group_participant(p_chat_id, p_user_id)` — самовыход ИЛИ admin удаляет другого.
 - `delete_user_account()` — `DELETE public.users WHERE id=auth.uid()` + `DELETE auth.users WHERE id=auth.uid()`. Полагается на каскад FK для сообщений/чатов. **НЕ удаляет файлы Storage** (пробел для Apple 5.1.1(v)).
 - `get_registered_contacts(phone_numbers[])` → `SETOF users` через `SELECT *` (возвращает и `apns_token` — лишнее раскрытие; добавить выбор колонок + лимит/rate-limit).
+- `clear_chat(p_chat_id)` / `delete_chat(p_chat_id)` / `undelete_chat(p_chat_id)` — персистентные per-user метки очистки/удаления чата на `chat_participants` (SECURITY DEFINER, `WHERE user_id=auth.uid()`; clear→cleared_at+unread=0, delete→+deleted_at, undelete→deleted_at=NULL). См. `security/chat-clear-delete-and-avatar-full.sql`.
 
 ## Триггеры (public, на messages)
 

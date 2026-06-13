@@ -291,7 +291,9 @@ struct GroupInfoView: View {
                 Task {
                     isUpdatingAvatar = true
                     if let data = try? await item.loadTransferable(type: Data.self) {
-                        if let compressed = await ImageCompressor.shared.generateThumbnailData(from: data, maxPixelSize: 600) {
+                        // Групповой аватар — один файл повышенного разрешения (≤1024px), чтобы не
+                        // пикселил на экране группы (64pt) и в шапке. Отдельной full-версии у групп нет.
+                        if let compressed = await ImageCompressor.shared.generateThumbnailData(from: data, maxPixelSize: 1024) {
                             do {
                                 let newURL = try await chatService.updateGroupAvatar(chatId: chat.id, avatarData: compressed, context: context)
                                 self.groupAvatar = newURL

@@ -45,6 +45,8 @@ class SupabaseAuthService: AuthServiceProtocol {
                     name: userDTO.name,
                     nickname: userDTO.nickname ?? "user",
                     avatar: SupabaseConfig.rewrittenURL(fromStored: userDTO.avatar_url),
+                    // Обход РКН: полный аватар тоже через текущий прокси-хост.
+                    avatarFull: SupabaseConfig.rewrittenURL(fromStored: userDTO.avatar_url_full),
                     isOnline: userDTO.is_online
                 )
             }
@@ -135,25 +137,49 @@ class SupabaseAuthService: AuthServiceProtocol {
             throw NSError(domain: "AuthError", code: 401, userInfo: [NSLocalizedDescriptionKey: "Не авторизован"])
         }
         
-        var updatedAvatarUrl: String? = nil
-        
-        if let data = avatarData {
-            let fileName = "\(userId)_\(UUID().uuidString.lowercased()).jpg"
-            
-            try await client.storage
-                .from("avatars")
-                .upload(fileName, data: data, options: FileOptions(contentType: "image/jpeg"))
-            updatedAvatarUrl = try client.storage.from("avatars").getPublicURL(path: fileName).absoluteString
+        var updatedThumbUrl: String? = nil
+        var updatedFullUrl: String? = nil
+
+        if let fullData = avatarData {
+            // avatarData приходит уже как «полная» версия (≤1280px, см. SettingsView).
+            // Грузим ДВЕ версии: тумбу (≤256px — список/шапка, малый трафик) и полную
+            // (профиль/fullscreen, высокое качество).
+            let base = "\(userId)_\(UUID().uuidString.lowercased())"
+            let thumbData = await ImageCompressor.shared.generateThumbnailData(from: fullData, maxPixelSize: 256) ?? fullData
+
+            // Тумба всегда JPEG (generateThumbnailData). Полная может быть HEIC (resizeIfNeeded) —
+            // имя/Content-Type ветвим по реальным байтам (как у медиа в чате), иначе объект «врёт»
+            // формат (ломает ShareLink/веб/CDN-трансформы; для in-app декода по байтам не критично).
+            let fullIsHEIC = fullData.isHEIC
+            let thumbName = "\(base).jpg"
+            let fullName = fullIsHEIC ? "\(base)_full.heic" : "\(base)_full.jpg"
+
+            try await client.storage.from("avatars")
+                .upload(thumbName, data: thumbData, options: FileOptions(contentType: "image/jpeg"))
+            do {
+                try await client.storage.from("avatars")
+                    .upload(fullName, data: fullData, options: FileOptions(contentType: fullIsHEIC ? "image/heic" : "image/jpeg"))
+            } catch {
+                // Полная не залилась — убираем осиротевшую тумбу (не копим мусор) и пробрасываем.
+                _ = try? await client.storage.from("avatars").remove(paths: [thumbName])
+                throw error
+            }
+
+            updatedThumbUrl = try client.storage.from("avatars").getPublicURL(path: thumbName).absoluteString
+            updatedFullUrl = try client.storage.from("avatars").getPublicURL(path: fullName).absoluteString
         }
-        
+
         var updateDict: [String: AnyJSON] = [
             "name": .string(name),
             "nickname": .string(nickname)
         ]
-        if let url = updatedAvatarUrl {
+        if let url = updatedThumbUrl {
             updateDict["avatar_url"] = .string(url)
         }
-        
+        if let urlFull = updatedFullUrl {
+            updateDict["avatar_url_full"] = .string(urlFull)
+        }
+
         try await client.from("users")
             .update(updateDict)
             .eq("id", value: userId)

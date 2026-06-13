@@ -14,6 +14,7 @@ struct UserDTO: Codable {
     let name: String
     let nickname: String?
     let avatar_url: String?
+    let avatar_url_full: String?
     let is_online: Bool
 }
 
@@ -37,6 +38,9 @@ struct ChatParticipantDTO: Codable {
     let unread_count: Int
     let role: String?
     let is_muted: Bool?
+    // Метки очистки/удаления чата для ДАННОГО участника (per-user). nil — не очищался/не удалялся.
+    let cleared_at: Date?
+    let deleted_at: Date?
 }
 
 // MARK: - Group Chat DTOs

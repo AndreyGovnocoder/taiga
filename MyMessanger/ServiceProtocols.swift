@@ -59,10 +59,12 @@ protocol ChatServiceProtocol {
     /// медиа этого чата из LocalCache. Сервер НЕ трогает (чат вернётся пустым, если
     /// собеседник пришлёт новое сообщение). Аватары и медиа других чатов не затрагиваются.
     @MainActor func deleteChat(chatId: String, context: ModelContext) async throws
-    /// «Очистить чат»: мягко скрывает все видимые сообщения (isHiddenLocally = true) и
-    /// сбрасывает snapshot последнего сообщения. На сервере сообщения сохраняются (то же
-    /// поведение, что и «Очистить весь чат» в настройках хранилища). Возвращает число скрытых.
-    @MainActor @discardableResult func clearChat(chatId: String, context: ModelContext) throws -> Int
+    /// «Очистить чат»: серверная метка cleared_at (RPC, персистентно) + мгновенное локальное
+    /// скрытие. Сообщения старше метки больше не тянутся/не показываются (переживает ресинк).
+    /// На сервере сами сообщения сохраняются. Возвращает число локально скрытых.
+    @MainActor @discardableResult func clearChat(chatId: String, context: ModelContext) async throws -> Int
+    /// Точечная дозагрузка сообщения по id (фоновый пуш) в общий mainContext. true — если вставлено.
+    @MainActor @discardableResult func fetchAndStoreMessage(messageId: String, container: ModelContainer) async throws -> Bool
 
     // MARK: - Group Chat
     @MainActor func createGroupChat(name: String, avatarURL: URL?, participantIds: [String], context: ModelContext) async throws -> Chat

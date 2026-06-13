@@ -412,13 +412,15 @@ struct ChatStorageDetailView: View {
     /// Единый источник логики — ChatServiceProtocol.clearChat (та же логика на экране профиля чата).
     private func clearAllMessages() {
         isProcessing = true
-        do {
-            let count = try chatService.clearChat(chatId: chatInfo.id, context: context)
-            resultMessage = "Скрыто сообщений: \(count)"
-        } catch {
-            resultMessage = "Ошибка: \(error.localizedDescription)"
+        Task {
+            do {
+                let count = try await chatService.clearChat(chatId: chatInfo.id, context: context)
+                resultMessage = "Скрыто сообщений: \(count)"
+            } catch {
+                resultMessage = "Ошибка: \(error.localizedDescription)"
+            }
+            isProcessing = false
         }
-        isProcessing = false
     }
     
     /// Скрыть только медиа-сообщения (image)

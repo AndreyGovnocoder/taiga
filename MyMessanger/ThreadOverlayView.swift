@@ -537,23 +537,25 @@ struct ThreadReplyBar: View {
     let onCancel: () -> Void
     
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(alignment: .top, spacing: 6) {
             RoundedRectangle(cornerRadius: 1)
                 .fill(Color.blue)
-                .frame(width: 2, height: 20)
-            
-            Text(senderName + ":")
-                .font(.body)
-                .fontWeight(.bold)
-                .foregroundStyle(.blue)
-            
-            Text(previewText)
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            
+                .frame(width: 2)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(senderName + ":")
+                    .font(.body)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.blue)
+
+                Text(previewText)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2...4)
+            }
+
             Spacer(minLength: 4)
-            
+
             Button {
                 onCancel()
             } label: {
@@ -565,7 +567,7 @@ struct ThreadReplyBar: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
         .background(Color(.secondarySystemBackground))
     }
     

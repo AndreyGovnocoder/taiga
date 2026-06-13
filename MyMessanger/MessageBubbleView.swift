@@ -689,7 +689,7 @@ struct ReplyPreviewInBubble: View {
                 Text(previewText)
                     .font(.caption2)
                     .foregroundStyle(isCurrentUser ? .white.opacity(0.8) : .secondary)
-                    .lineLimit(1)
+                    .lineLimit(2...3)
             }
         }
         .padding(.horizontal, 10)

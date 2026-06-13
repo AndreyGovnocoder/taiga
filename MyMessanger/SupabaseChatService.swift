@@ -76,34 +76,84 @@ class SupabaseChatService: ChatServiceProtocol {
                 name: uDTO.name,
                 nickname: uDTO.nickname ?? "",
                 avatarURL: SupabaseConfig.rewrittenURL(fromStored: uDTO.avatar_url),
+                // Обход РКН: полный аватар тоже переписываем на текущий прокси-хост (как тумбу).
+                avatarURLFull: SupabaseConfig.rewrittenURL(fromStored: uDTO.avatar_url_full),
                 isOnline: uDTO.is_online
             )
             context.insert(userDB)
         }
-        
+
         for cDTO in chatsDTO {
+            let chatIdStr = cDTO.id.uuidString.lowercased()
             let pIds = allParticipants.filter { $0.chat_id == cDTO.id }.map { $0.user_id.uuidString.lowercased() }
             let myParticipant = myParticipants.first { $0.chat_id == cDTO.id }
             let unread = myParticipant?.unread_count ?? 0
             let role = myParticipant?.role ?? "member"
             let muted = myParticipant?.is_muted ?? false
-            
+            let clearedAt = myParticipant?.cleared_at
+            let deletedAt = myParticipant?.deleted_at
+
+            // «Удалён для меня» (deleted_at): чат скрыт, пока последнее сообщение не НОВЕЕ метки.
+            // Более новое сообщение (last_message_at > deletedAt) оживляет чат.
+            let isDeletedForMe: Bool = {
+                guard let deletedAt else { return false }
+                guard let lastAt = cDTO.last_message_at else { return true }
+                return lastAt <= deletedAt
+            }()
+            if isDeletedForMe {
+                // Удалён (в т.ч. на другом устройстве): убираем локальный ChatDB И его сообщения,
+                // иначе при оживлении (новое сообщение) всплыли бы старые pre-watermark сообщения.
+                let existingDesc = FetchDescriptor<ChatDB>(predicate: #Predicate<ChatDB> { $0.id == chatIdStr })
+                if let existing = try? context.fetch(existingDesc).first {
+                    context.delete(existing)
+                }
+                let msgDesc = FetchDescriptor<MessageDB>(predicate: #Predicate<MessageDB> { $0.chatId == chatIdStr })
+                if let oldMsgs = try? context.fetch(msgDesc) {
+                    for m in oldMsgs { context.delete(m) }
+                }
+                continue
+            }
+
+            // «Очищен» (cleared_at): если последнее сообщение НЕ новее метки — превью пустое
+            // (последнее сообщение очищено). Иначе показываем серверный snapshot.
+            let snapshotCleared: Bool = {
+                guard let clearedAt, let lastAt = cDTO.last_message_at else { return false }
+                return lastAt <= clearedAt
+            }()
+
+            // Очистка обнуляет непрочитанные (RPC делает то же на сервере) — чтобы у очищенного
+            // чата не остался бейдж при пустом превью.
+            let effectiveUnread = snapshotCleared ? 0 : unread
+
+            // Sweep: прячем локальные сообщения <= cleared_at (мультидевайс/2-е устройство, где
+            // очистку делали НЕ здесь — иначе превью и сам чат показывали бы старые сообщения).
+            if let clearedAt {
+                let sweepDesc = FetchDescriptor<MessageDB>(
+                    predicate: #Predicate<MessageDB> { $0.chatId == chatIdStr && $0.isHiddenLocally == false && $0.createdAt <= clearedAt }
+                )
+                if let toHide = try? context.fetch(sweepDesc) {
+                    for m in toHide { m.isHiddenLocally = true }
+                }
+            }
+
             let type: ChatType = cDTO.type == "personal"
             ? .personal
             : .group(name: cDTO.name ?? "Группа", avatarURL: SupabaseConfig.rewrittenURL(fromStored: cDTO.avatar_url))
-            
+
             let chatDB = ChatDB(
-                id: cDTO.id.uuidString.lowercased(),
+                id: chatIdStr,
                 type: type,
-                unreadCount: unread,
+                unreadCount: effectiveUnread,
                 participantIds: pIds,
-                lastMessageId: cDTO.last_message_id?.uuidString.lowercased(),
+                lastMessageId: snapshotCleared ? nil : cDTO.last_message_id?.uuidString.lowercased(),
                 myRole: role,
                 isMuted: muted,
-                lastMessageText: cDTO.last_message_text,
-                lastMessageAt: cDTO.last_message_at,
-                lastMessageSenderId: cDTO.last_message_sender_id?.uuidString.lowercased(),
-                lastMessageType: cDTO.last_message_type
+                lastMessageText: snapshotCleared ? nil : cDTO.last_message_text,
+                lastMessageAt: snapshotCleared ? nil : cDTO.last_message_at,
+                lastMessageSenderId: snapshotCleared ? nil : cDTO.last_message_sender_id?.uuidString.lowercased(),
+                lastMessageType: snapshotCleared ? nil : cDTO.last_message_type,
+                clearedAt: clearedAt,
+                deletedAt: deletedAt
             )
             context.insert(chatDB)
         }
@@ -113,13 +163,14 @@ class SupabaseChatService: ChatServiceProtocol {
         
         try? context.save()
         
-        // Пересчитываем snapshot из локальных сообщений (с учётом isHiddenLocally).
-        // Серверный snapshot мог показать сообщение, которое пользователь локально скрыл.
+        // Пересчитываем snapshot с учётом локально скрытых, НО не перетираем свежий серверный
+        // snapshot более старым локальным (respectServerRecency) — иначе список показывает
+        // устаревшее превью, пока не зайдёшь в чат (нюанс «обновляется только после визита»).
         let descriptor = FetchDescriptor<ChatDB>()
         let chatDBs = (try? context.fetch(descriptor)) ?? []
-        
+
         for chatDB in chatDBs {
-            chatDB.updateSnapshot(context: context)
+            chatDB.updateSnapshot(context: context, respectServerRecency: true)
         }
         try? context.save()
         
@@ -142,16 +193,29 @@ class SupabaseChatService: ChatServiceProtocol {
         return domainChats
     }
     
+    /// Серверная метка «очистить чат» (зеркало chat_participants.cleared_at) из локального ChatDB.
+    private func clearedAtForChat(_ chatId: String, context: ModelContext) -> Date? {
+        let desc = FetchDescriptor<ChatDB>(predicate: #Predicate<ChatDB> { $0.id == chatId })
+        return (try? context.fetch(desc).first)?.clearedAt
+    }
+
     func fetchMessages(for chatId: String, limit: Int = 50, before date: Date? = nil, context: ModelContext) async throws -> Int {
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
         var query = client.from("messages").select().eq("chat_id", value: chatId)
-        
+
         if let validDate = date {
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            let dateStr = formatter.string(from: validDate)
-            query = query.lt("created_at", value: dateStr)
+            query = query.lt("created_at", value: isoFormatter.string(from: validDate))
         }
-        
+
+        // «Очистить чат»: не тянем сообщения старше серверной метки cleared_at (per-user),
+        // иначе очищенная история восстановилась бы при ресинке. Совместимо с пагинацией
+        // (before+gt = окно): долистывание вверх упрётся в метку и корректно остановится.
+        if let clearedAt = clearedAtForChat(chatId, context: context) {
+            query = query.gt("created_at", value: isoFormatter.string(from: clearedAt))
+        }
+
         let messagesDTO: [MessageDTO] = try await query
             .order("created_at", ascending: false)
             .limit(limit)
@@ -804,6 +868,13 @@ class SupabaseChatService: ChatServiceProtocol {
                 }
             }
 
+            // «Удалить чат»: скрываем удалённый чат, пока последнее сообщение не НОВЕЕ метки
+            // удаления (защитно — обычно такой ChatDB уже удалён в fetchChats/deleteChat).
+            if let deletedAt = chatDB.deletedAt,
+               (chatDB.lastMessageAt == nil || chatDB.lastMessageAt! <= deletedAt) {
+                continue
+            }
+
             let chat = chatDB.toDomain(participants: participants, lastMessage: nil)
 
             // UGC-модерация: скрываем личный (1:1) чат с заблокированным собеседником.
@@ -1070,12 +1141,16 @@ class SupabaseChatService: ChatServiceProtocol {
 
     // MARK: - Chat management (local)
 
-    /// Полное локальное удаление чата: все сообщения, сам ChatDB и файлы медиа из LocalCache.
-    /// Сервер НЕ трогаем (нет RPC удаления для 1:1; чат вернётся пустым при новом сообщении —
-    /// штатная семантика «удалить переписку»). Аватары и медиа других чатов не затрагиваются:
-    /// удаляем только ключи кэша из image-сообщений ЭТОГО чата.
+    /// Полное удаление чата с устройства + персистентная серверная метка. Сервер: RPC delete_chat
+    /// ставит cleared_at+deleted_at=now() на МОЁМ участии (server-first) — чат не восстановится при
+    /// ресинке/перезапуске, вернётся пустым только при сообщении новее метки. Локально: стираем все
+    /// сообщения, ChatDB и файлы медиа ЭТОГО чата из LocalCache (аватары/чужие медиа не трогаем).
     func deleteChat(chatId: String, context: ModelContext) async throws {
         let cId = chatId
+
+        // 0. Серверная метка (server-first). При ошибке RPC бросаем — локально НЕ удаляем,
+        //    иначе локально пусто, а на сервере метки нет → чат вернётся при следующем ресинке.
+        try await client.rpc("delete_chat", params: ["p_chat_id": cId]).execute()
 
         // 1. Собираем ключи кэша медиа (original + thumb) ДО удаления строк — после
         //    context.delete() контент будет недоступен.
@@ -1106,15 +1181,25 @@ class SupabaseChatService: ChatServiceProtocol {
         }
     }
 
-    /// «Очистить чат»: мягкое скрытие всех видимых сообщений (isHiddenLocally = true) +
-    /// сброс snapshot. Единый источник для настроек хранилища и экрана профиля чата.
+    /// «Очистить чат»: персистентная серверная метка cleared_at=now() (RPC, server-first) +
+    /// мгновенное локальное скрытие текущих сообщений (isHiddenLocally) и оптимистичная локальная
+    /// метка (точное серверное время подтянется на следующем fetchChats). Единый источник для
+    /// настроек хранилища и экрана профиля чата. Сообщения с createdAt <= cleared_at больше не
+    /// тянутся (fetchMessages) и не показываются — очистка переживает ресинк/перезапуск.
     @discardableResult
-    func clearChat(chatId: String, context: ModelContext) throws -> Int {
+    func clearChat(chatId: String, context: ModelContext) async throws -> Int {
         let cId = chatId
+
+        // 0. Серверная метка (server-first). При ошибке — не трогаем локальное состояние.
+        try await client.rpc("clear_chat", params: ["p_chat_id": cId]).execute()
+
+        // 1. Локально скрываем текущие видимые сообщения и запоминаем createdAt новейшего
+        //    (серверное время сообщения, без clock skew) как оптимистичную метку clearedAt.
         let descriptor = FetchDescriptor<MessageDB>(
             predicate: #Predicate<MessageDB> { $0.chatId == cId && $0.isHiddenLocally == false }
         )
         let messages = try context.fetch(descriptor)
+        let newestAt = messages.map { $0.createdAt }.max()
         for message in messages {
             message.isHiddenLocally = true
         }
@@ -1122,10 +1207,72 @@ class SupabaseChatService: ChatServiceProtocol {
         try context.save()
         let chatDesc = FetchDescriptor<ChatDB>(predicate: #Predicate<ChatDB> { $0.id == cId })
         if let chat = try? context.fetch(chatDesc).first {
+            // max(текущая метка, новейшее скрытое) — не откатываем назад уже стоявшую метку.
+            let optimistic = newestAt ?? Date()
+            if let existing = chat.clearedAt {
+                chat.clearedAt = max(existing, optimistic)
+            } else {
+                chat.clearedAt = optimistic
+            }
+            chat.unreadCount = 0   // RPC обнуляет unread на сервере — синхронно гасим и локально
             chat.updateSnapshot(context: context)
         }
         try context.save()
         return messages.count
+    }
+
+    /// Точечная дозагрузка одного сообщения по id (фоновый пуш, нюанс №6) + сохранение в общий
+    /// mainContext, чтобы сообщение было локально ещё ДО открытия приложения. Идемпотентно
+    /// (дедуп по id). Уважает cleared_at (старое скрываем). Возвращает true, если вставили.
+    @discardableResult
+    func fetchAndStoreMessage(messageId: String, container: ModelContainer) async throws -> Bool {
+        let context = container.mainContext
+        let msgId = messageId.lowercased()
+
+        let existingDesc = FetchDescriptor<MessageDB>(predicate: #Predicate<MessageDB> { $0.id == msgId })
+        if (try? context.fetch(existingDesc).first) != nil { return false }  // уже есть — no-op
+
+        let dtos: [MessageDTO] = try await client
+            .from("messages").select().eq("id", value: messageId).limit(1).execute().value
+        guard let dto = dtos.first else { return false }
+
+        let chatId = dto.chat_id.uuidString.lowercased()
+        let content = parseMessageContent(
+            type: dto.content_type, text: dto.content_text,
+            imageUrl: dto.content_image_url, thumbUrl: dto.content_thumb_url,
+            width: dto.image_width, height: dto.image_height, blurHash: dto.content_blur_hash
+        )
+        let msgDB = MessageDB(
+            id: msgId,
+            chatId: chatId,
+            senderId: dto.sender_id.uuidString.lowercased(),
+            replyToMessageId: dto.reply_to_message_id?.uuidString.lowercased(),
+            threadRootId: dto.thread_root_id?.uuidString.lowercased(),
+            content: content,
+            createdAt: dto.created_at,
+            status: MessageStatus(rawValue: dto.status) ?? .sent
+        )
+        // Уважаем «очистить чат»: сообщение старше метки не показываем.
+        if let clearedAt = clearedAtForChat(chatId, context: context), dto.created_at <= clearedAt {
+            msgDB.isHiddenLocally = true
+        }
+        context.insert(msgDB)
+
+        // Обновляем snapshot чата, если он есть локально (на форграунде fetchChats/realtime
+        // довосстановят остальное, в т.ч. оживят удалённый чат через newChatDetected).
+        let chatDesc = FetchDescriptor<ChatDB>(predicate: #Predicate<ChatDB> { $0.id == chatId })
+        if let chatDB = try? context.fetch(chatDesc).first {
+            chatDB.updateSnapshot(context: context)
+        }
+        try? context.save()
+
+        // Если пуш доставлен в foreground — оповещаем UI (открытый чат/список), как realtime-путь.
+        NotificationCenter.default.post(
+            name: Notification.Name("newMessageSaved"),
+            object: chatId,
+            userInfo: ["eventType": "inserted"]
+        )
+        return true
     }
 
     func sendMediaMessages(chatId: String, datas: [Data], text: String?, replyToMessageId: String?, threadRootId: String?, context: ModelContext) async {
@@ -1463,14 +1610,21 @@ class SupabaseChatService: ChatServiceProtocol {
             .rpc("get_or_create_personal_chat", params:["p_target_user_id": targetUserUUID])
             .execute()
             .value
-        
+
+        // Явное открытие из Контактов = «снять удаление»: если чат ранее удаляли (deleted_at) и
+        // новых сообщений не было, fetchChats иначе пропустил бы его → 404. Снимаем deleted_at на
+        // сервере (cleared_at сохраняется — история остаётся очищенной, чат открывается пустым).
+        try? await client
+            .rpc("undelete_chat", params: ["p_chat_id": chatId.uuidString.lowercased()])
+            .execute()
+
         _ = try await self.fetchChats(context: context)
-        
+
         let localChats = try self.fetchLocalChats(context: context)
         if let newChat = localChats.first(where: { $0.id == chatId.uuidString.lowercased() }) {
             return newChat
         }
-        
+
         throw NSError(domain: "ChatService", code: 404, userInfo:[NSLocalizedDescriptionKey: "Не удалось загрузить созданный чат"])
     }
     

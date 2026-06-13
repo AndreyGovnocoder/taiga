@@ -17,14 +17,17 @@ class UserDB {
     var name: String
     var nickname: String
     var avatarURL: URL?
+    /// Полноразмерная версия аватара (профиль/fullscreen); avatarURL — компактная тумба.
+    var avatarURLFull: URL?
     var isOnline: Bool = false
-    
-    init(id: String, phoneNumber: String, name: String, nickname: String, avatarURL: URL? = nil, isOnline: Bool) {
+
+    init(id: String, phoneNumber: String, name: String, nickname: String, avatarURL: URL? = nil, avatarURLFull: URL? = nil, isOnline: Bool) {
         self.id = id
         self.phoneNumber = phoneNumber
         self.name = name
         self.nickname = nickname
         self.avatarURL = avatarURL
+        self.avatarURLFull = avatarURLFull
         self.isOnline = isOnline
     }
 }
@@ -86,14 +89,20 @@ class ChatDB {
     var lastMessageId: String?
     var myRole: String = "member"
     var isMuted: Bool = false
-    
+
     // MARK: - Snapshot последнего сообщения (денормализация)
     var lastMessageText: String?
     var lastMessageAt: Date?
     var lastMessageSenderId: String?
     var lastMessageType: String?
-    
-    init(id: String, type: ChatType, unreadCount: Int, participantIds: [String], lastMessageId: String? = nil, myRole: String = "member", isMuted: Bool = false, lastMessageText: String? = nil, lastMessageAt: Date? = nil, lastMessageSenderId: String? = nil, lastMessageType: String? = nil) {
+
+    // MARK: - Метки очистки/удаления (зеркало серверных chat_participants.cleared_at/deleted_at)
+    /// Сообщения с createdAt <= clearedAt скрыты («очистить чат»). nil — чат не очищался.
+    var clearedAt: Date?
+    /// Чат «удалён» для меня, пока lastMessageAt <= deletedAt; более новое сообщение оживляет.
+    var deletedAt: Date?
+
+    init(id: String, type: ChatType, unreadCount: Int, participantIds: [String], lastMessageId: String? = nil, myRole: String = "member", isMuted: Bool = false, lastMessageText: String? = nil, lastMessageAt: Date? = nil, lastMessageSenderId: String? = nil, lastMessageType: String? = nil, clearedAt: Date? = nil, deletedAt: Date? = nil) {
         self.id = id
         self.type = type
         self.unreadCount = unreadCount
@@ -105,46 +114,76 @@ class ChatDB {
         self.lastMessageAt = lastMessageAt
         self.lastMessageSenderId = lastMessageSenderId
         self.lastMessageType = lastMessageType
+        self.clearedAt = clearedAt
+        self.deletedAt = deletedAt
     }
 }
 
 extension ChatDB {
-    func updateSnapshot(context: ModelContext) {
+    /// Пересчёт денормализованного snapshot последнего сообщения из локальных данных.
+    ///
+    /// - respectServerRecency: режим для fetchChats. Серверный snapshot (только что записанный)
+    ///   обычно НОВЕЕ локального (новейшее сообщение могло ещё не подгрузиться пагинацией),
+    ///   поэтому его НЕ перетираем более старым локальным — иначе список показывает устаревшее
+    ///   превью, пока не зайдёшь в чат. Перетираем только если знаем, что серверное последнее
+    ///   сообщение локально СКРЫТО (сервер показывает скрытое), либо локальное не старше серверного.
+    ///   По умолчанию (delete/clear/hide) snapshot строго следует за локальным состоянием.
+    func updateSnapshot(context: ModelContext, respectServerRecency: Bool = false) {
         let cId = self.id
-        
-        // Проверяем: есть ли ВООБЩЕ локальные сообщения для этого чата?
-        // Если нет — значит сообщения ещё не загружались, оставляем серверный snapshot.
-        let allMsgDesc = FetchDescriptor<MessageDB>(
-            predicate: #Predicate<MessageDB> { $0.chatId == cId }
-        )
-        let totalCount = (try? context.fetchCount(allMsgDesc)) ?? 0
-        guard totalCount > 0 else { return } // нет локальных сообщений — не трогаем snapshot
-        
-        // Ищем последнее видимое сообщение
+
+        // Последнее ВИДИМОЕ локальное сообщение.
         var visibleDesc = FetchDescriptor<MessageDB>(
             predicate: #Predicate<MessageDB> { $0.chatId == cId && $0.isHiddenLocally == false },
             sortBy: Array(arrayLiteral: SortDescriptor(\.createdAt, order: .reverse))
         )
         visibleDesc.fetchLimit = 1
-        
-        if let prevMsg = try? context.fetch(visibleDesc).first {
-            self.lastMessageId = prevMsg.id
-            self.lastMessageAt = prevMsg.createdAt
-            self.lastMessageSenderId = prevMsg.senderId
-            if case .text(let text) = prevMsg.content {
-                self.lastMessageText = text
-                self.lastMessageType = "text"
-            } else if case .image(_, _, let text, _, _, _) = prevMsg.content {
-                self.lastMessageText = text
-                self.lastMessageType = "image"
+        let newestVisible = try? context.fetch(visibleDesc).first
+
+        if respectServerRecency {
+            // Скрыто ли локально серверное последнее сообщение?
+            var serverLastHidden = false
+            if let sid = self.lastMessageId {
+                let sDesc = FetchDescriptor<MessageDB>(predicate: #Predicate<MessageDB> { $0.id == sid })
+                if let serverMsg = try? context.fetch(sDesc).first {
+                    serverLastHidden = serverMsg.isHiddenLocally
+                }
             }
-        } else {
-            // Все локальные сообщения скрыты — пользователь очистил чат
+            if serverLastHidden {
+                applySnapshot(from: newestVisible)              // сервер показывает скрытое — берём локальное
+            } else if let nv = newestVisible,
+                      (self.lastMessageAt == nil || nv.createdAt >= self.lastMessageAt!) {
+                applySnapshot(from: nv)                          // локальное не старше — принимаем
+            }
+            // иначе: серверный snapshot актуален/новее — НЕ трогаем
+            return
+        }
+
+        // Локально-авторитетный режим (delete/clear/hide): snapshot строго следует за локальным.
+        let allMsgDesc = FetchDescriptor<MessageDB>(predicate: #Predicate<MessageDB> { $0.chatId == cId })
+        let totalCount = (try? context.fetchCount(allMsgDesc)) ?? 0
+        guard totalCount > 0 else { return } // нет локальных сообщений — не трогаем серверный snapshot
+        applySnapshot(from: newestVisible)   // newestVisible == nil → очистка (все скрыты)
+    }
+
+    /// Применяет snapshot из сообщения (nil — очищает: чат пуст или все сообщения скрыты).
+    private func applySnapshot(from msg: MessageDB?) {
+        guard let msg else {
             self.lastMessageId = nil
             self.lastMessageText = nil
             self.lastMessageAt = nil
             self.lastMessageSenderId = nil
             self.lastMessageType = nil
+            return
+        }
+        self.lastMessageId = msg.id
+        self.lastMessageAt = msg.createdAt
+        self.lastMessageSenderId = msg.senderId
+        if case .text(let text) = msg.content {
+            self.lastMessageText = text
+            self.lastMessageType = "text"
+        } else if case .image(_, _, let text, _, _, _) = msg.content {
+            self.lastMessageText = text
+            self.lastMessageType = "image"
         }
     }
 }

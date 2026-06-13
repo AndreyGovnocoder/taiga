@@ -13,6 +13,8 @@ struct User: Identifiable, Hashable {
     var name: String
     var nickname: String
     var avatar: URL?
+    /// Полноразмерный аватар (профиль/fullscreen). nil — нет крупной версии, использовать `avatar`.
+    var avatarFull: URL?
     var isOnline: Bool = false
     
     static let currentUserMock = User(id: "user_1", phoneNumber: "+79140384414", name: "Андрей", nickname: "goose", isOnline: true)

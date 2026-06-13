@@ -131,20 +131,42 @@ struct ChatDetailView: View {
             } message: {
                 Text("Ошибка удаления, повторите позже")
             }
-            .alert("Редактировать", isPresented: Binding(
+            .sheet(isPresented: Binding(
                 get: { editingMessage != nil },
                 set: { if !$0 { editingMessage = nil } }
             )) {
-                TextField("Текст сообщения", text: $editText)
-                Button("Сохранить") {
-                    if let msg = editingMessage, !editText.isEmpty {
-                        Task {
-                            await viewModel.editMessage(msg, newText: editText)
+                NavigationStack {
+                    VStack(spacing: 0) {
+                        // Многострочный редактор: расширяется ВЕРТИКАЛЬНО (как основной input),
+                        // а не уходит вправо в одну строку (прежний TextField в .alert).
+                        TextEditor(text: $editText)
+                            .font(.body)
+                            .frame(minHeight: 80, maxHeight: 240)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(8)
+                            .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
+                            .padding()
+                        Spacer()
+                    }
+                    .navigationTitle("Редактировать")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Отмена") { editingMessage = nil }
+                        }
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Сохранить") {
+                                if let msg = editingMessage,
+                                   !editText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    Task { await viewModel.editMessage(msg, newText: editText) }
+                                }
+                                editingMessage = nil
+                            }
+                            .fontWeight(.semibold)
                         }
                     }
-                    editingMessage = nil
                 }
-                Button("Отмена", role: .cancel) { editingMessage = nil }
+                .presentationDetents([.medium, .large])
             }
             .onAppear { handleOnAppear() }
             .onDisappear { handleOnDisappear() }
@@ -925,25 +947,27 @@ struct ReplyPreviewBar: View {
     let onCancel: () -> Void
     
     var body: some View {
-        HStack(spacing: 6) {
-            // Accent bar
+        HStack(alignment: .top, spacing: 6) {
+            // Accent bar (растягивается по высоте многострочного превью)
             RoundedRectangle(cornerRadius: 1)
                 .fill(Color.blue)
-                .frame(width: 2, height: 20)
-            
-            // Имя + текст в одну строку
-            Text(displaySenderName)
-                .font(.body)
-                .fontWeight(.bold)
-                .foregroundStyle(.blue)
-            
-            Text(replyPreviewText)
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            
+                .frame(width: 2)
+
+            // Имя над текстом; текст многострочный (2–4 строки), не обрезается «…»
+            VStack(alignment: .leading, spacing: 1) {
+                Text(displaySenderName)
+                    .font(.body)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.blue)
+
+                Text(replyPreviewText)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2...4)
+            }
+
             Spacer(minLength: 4)
-            
+
             Button {
                 onCancel()
             } label: {
@@ -955,7 +979,7 @@ struct ReplyPreviewBar: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
         .background(.bar)
     }
     

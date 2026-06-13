@@ -31,6 +31,10 @@ struct ChatInfoView: View {
     @State private var showBlockConfirm = false
     @State private var moderationNotice: String?
     @State private var errorMessage: String?
+    @State private var fullscreenAvatar: FullscreenImageItem?
+
+    /// Крупный аватар для профиля/fullscreen — предпочитаем полноразмерную версию.
+    private var profileAvatarURL: URL? { interlocutor?.avatarFull ?? interlocutor?.avatar }
 
     var body: some View {
         NavigationStack {
@@ -120,15 +124,39 @@ struct ChatInfoView: View {
                 Text(errorMessage ?? "")
             }
         }
+        .overlay {
+            if let item = fullscreenAvatar {
+                FullscreenImageViewer(
+                    imageURL: item.imageURL,
+                    thumbURL: item.thumbURL,
+                    blurHash: item.blurHash,
+                    imageWidth: item.imageWidth,
+                    imageHeight: item.imageHeight,
+                    onDismiss: { withAnimation(.easeOut(duration: 0.25)) { fullscreenAvatar = nil } }
+                )
+                .ignoresSafeArea()
+                .transition(.opacity)
+            }
+        }
     }
 
     // MARK: - Subviews
 
     @ViewBuilder
     private var avatarView: some View {
-        if let avatar = interlocutor?.avatar {
+        if let avatar = profileAvatarURL {
             CachedImageView(avatarURL: avatar, size: 120)
                 .clipShape(Circle())
+                .onTapGesture {
+                    // Тап по аватарке → fullscreen в максимальном качестве (полная версия).
+                    fullscreenAvatar = FullscreenImageItem(
+                        imageURL: avatar,
+                        thumbURL: interlocutor?.avatar,
+                        blurHash: nil,
+                        imageWidth: nil,
+                        imageHeight: nil
+                    )
+                }
         } else {
             Circle()
                 .fill(Color.blue.opacity(0.2))
@@ -159,14 +187,16 @@ struct ChatInfoView: View {
 
     // MARK: - Actions
 
-    /// «Очистить чат» = та же логика, что в настройках хранилища (мягкое скрытие сообщений).
+    /// «Очистить чат» = та же логика, что в настройках хранилища (серверная метка + локальное скрытие).
     private func performClear() {
-        do {
-            try chatService.clearChat(chatId: chat.id, context: context)
-            onChatCleared()   // открытый чат сразу опустеет
-            dismiss()
-        } catch {
-            errorMessage = "Не удалось очистить чат. Попробуйте позже."
+        Task {
+            do {
+                try await chatService.clearChat(chatId: chat.id, context: context)
+                onChatCleared()   // открытый чат сразу опустеет
+                dismiss()
+            } catch {
+                errorMessage = "Не удалось очистить чат. Попробуйте позже."
+            }
         }
     }
 

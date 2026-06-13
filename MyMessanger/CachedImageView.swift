@@ -145,45 +145,49 @@ struct CachedImageView: View {
         
         loadTask = Task {
             guard let url = thumbURL ?? fullImageURL else { return }
-            
-            let cacheKey = url.lastPathComponent
+
             let scale: CGFloat = 3.0 // Retina @3x — безопасный fallback без deprecated UIScreen.main
             let targetPixelW = Int(displaySize.width * scale)
             let targetPixelH = Int(displaySize.height * scale)
-            
-            // 1. Проверяем memory cache (без await, мгновенно)
-            if let memoryImage = LocalCache.shared.cachedImageFromMemory(forKey: cacheKey) {
+            // Диск — СЫРЫЕ байты оригинала под голым ключом (общий для всех размеров, без
+            // повторной загрузки). Память — декод ПОД РАЗМЕР: иначе мелкий декод из списка (50pt)
+            // переиспользовался бы крупным профилем (120pt) → пиксельно.
+            let diskKey = url.lastPathComponent
+            let memKey = "\(diskKey)@\(targetPixelW)x\(targetPixelH)"
+
+            // 1. Проверяем memory cache по size-aware ключу (без await, мгновенно)
+            if let memoryImage = LocalCache.shared.cachedImageFromMemory(forKey: memKey) {
                 if !Task.isCancelled {
                     loadedImage = memoryImage
                 }
                 return
             }
-            
-            // 2. Проверяем disk cache
-            if let diskData = await LocalCache.shared.load(forKey: cacheKey) {
+
+            // 2. Проверяем disk cache (сырые байты) → даунсемпл под нужный размер
+            if let diskData = await LocalCache.shared.load(forKey: diskKey) {
                 let downsampled = downsample(data: diskData, maxWidth: targetPixelW, maxHeight: targetPixelH)
                 if !Task.isCancelled, let image = downsampled {
                     loadedImage = image
-                    // Promote в memory cache
-                    await LocalCache.shared.saveImage(image, forKey: cacheKey)
+                    await LocalCache.shared.saveImage(image, forKey: memKey)   // promote под size-aware ключом
                 }
                 return
             }
-            
+
             // 3. Загрузка с сервера
             guard url.scheme == "http" || url.scheme == "https" else { return }
-            
+
             do {
                 let (data, _) = try await URLSession.shared.data(from: url)
                 if Task.isCancelled { return }
-                
-                // Сохраняем на диск
-                await LocalCache.shared.saveImageData(data, forKey: cacheKey)
-                
-                // Downsampling
+
+                // Сырые байты на диск под голым ключом (без декода в память — память кэшируем
+                // даунсемпленной под memKey ниже).
+                await LocalCache.shared.save(data, forKey: diskKey)
+
                 let downsampled = downsample(data: data, maxWidth: targetPixelW, maxHeight: targetPixelH)
                 if !Task.isCancelled, let image = downsampled {
                     loadedImage = image
+                    await LocalCache.shared.saveImage(image, forKey: memKey)
                 }
             } catch {
                 print("CachedImageView: Ошибка загрузки \(url): \(error.localizedDescription)")

@@ -10,13 +10,22 @@ import Foundation
 
 extension UserDB {
     func toDomain() -> User {
-        return User(id: self.id, phoneNumber: self.phoneNumber, name: self.name, nickname: self.nickname, avatar: self.avatarURL.map(SupabaseConfig.rewrittenToCurrentHost), isOnline: self.isOnline)
+        return User(
+            id: self.id,
+            phoneNumber: self.phoneNumber,
+            name: self.name,
+            nickname: self.nickname,
+            avatar: self.avatarURL.map(SupabaseConfig.rewrittenToCurrentHost),
+            // ВАЖНО (обход РКН): полный аватар тоже ведём через текущий прокси-хост, как и тумбу.
+            avatarFull: self.avatarURLFull.map(SupabaseConfig.rewrittenToCurrentHost),
+            isOnline: self.isOnline
+        )
     }
 }
 
 extension User {
     func toDB() -> UserDB {
-        return UserDB(id: self.id, phoneNumber: self.phoneNumber, name: self.name, nickname: self.nickname, avatarURL: self.avatar, isOnline: self.isOnline)
+        return UserDB(id: self.id, phoneNumber: self.phoneNumber, name: self.name, nickname: self.nickname, avatarURL: self.avatar, avatarURLFull: self.avatarFull, isOnline: self.isOnline)
     }
 }
 
