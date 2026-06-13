@@ -1,0 +1,24 @@
+# Reverse-proxy для обхода блокировки РКН прямого хоста Supabase.
+# Клиент → этот Caddy (i-goose.pro, TLS Let's Encrypt) → переписывание Host/SNI → Supabase (за Cloudflare).
+# Деплой: AEZA (NL), Ubuntu 26.04, Caddy 2.11.x (apt). Подробности и порядок переезда — в README.md рядом.
+
+{
+    servers {
+        protocols h1 h2          # HTTP/3 выключен → только TCP. QUIC/UDP-443 не используем
+                                 # (он фигурировал в исходных зависаниях; держим стабильный TCP).
+    }
+}
+
+i-goose.pro {
+    # Supabase маршрутизирует по Host и SNI, поэтому прокси ОБЯЗАН переписать оба
+    # на хост проекта — иначе Realtime падает с tenant_not_found_in_host.
+    reverse_proxy https://rhoyopwzdqtcyawiipya.supabase.co {
+        header_up Host rhoyopwzdqtcyawiipya.supabase.co
+        transport http {
+            tls_server_name rhoyopwzdqtcyawiipya.supabase.co
+        }
+    }
+    log {
+        output file /var/log/caddy/access.log    # требует systemd drop-in LogsDirectory=caddy (см. README)
+    }
+}
