@@ -44,7 +44,7 @@ class SupabaseAuthService: AuthServiceProtocol {
                     phoneNumber: userDTO.phone_number ?? "",
                     name: userDTO.name,
                     nickname: userDTO.nickname ?? "user",
-                    avatar: userDTO.avatar_url.flatMap { URL(string: $0) },
+                    avatar: SupabaseConfig.rewrittenURL(fromStored: userDTO.avatar_url),
                     isOnline: userDTO.is_online
                 )
             }

@@ -10,7 +10,7 @@ import Foundation
 
 extension UserDB {
     func toDomain() -> User {
-        return User(id: self.id, phoneNumber: self.phoneNumber, name: self.name, nickname: self.nickname, avatar: self.avatarURL, isOnline: self.isOnline)
+        return User(id: self.id, phoneNumber: self.phoneNumber, name: self.name, nickname: self.nickname, avatar: self.avatarURL.map(SupabaseConfig.rewrittenToCurrentHost), isOnline: self.isOnline)
     }
 }
 
@@ -22,13 +22,29 @@ extension User {
 
 extension MessageDB {
     func toDomain() -> Message {
-        return Message(id: self.id, chatId: self.chatId, senderId: self.senderId, replyToMessageId: self.replyToMessageId, threadRootId: self.threadRootId, content: self.content, createdAt: self.createdAt, status: self.status)
+        return Message(id: self.id, chatId: self.chatId, senderId: self.senderId, replyToMessageId: self.replyToMessageId, threadRootId: self.threadRootId, content: self.content.routedToCurrentHost, createdAt: self.createdAt, status: self.status)
     }
 }
 
 extension Message {
     func toDB() -> MessageDB {
         return MessageDB(id: self.id, chatId: self.chatId, senderId: self.senderId, replyToMessageId: self.replyToMessageId, threadRootId: self.threadRootId, content: self.content, createdAt: self.createdAt, status: self.status)
+    }
+}
+
+extension MessageContent {
+    /// Переписывает host у медиа-URL на текущий прокси-хост (только для .image). Идемпотентно;
+    /// гарантирует, что любой сохранённый/кэшированный URL уходит на дисплей уже проксированным.
+    var routedToCurrentHost: MessageContent {
+        guard case let .image(imageURL, thumbURL, text, width, height, blurHash) = self else { return self }
+        return .image(
+            imageURL: SupabaseConfig.rewrittenToCurrentHost(imageURL),
+            thumbURL: thumbURL.map(SupabaseConfig.rewrittenToCurrentHost),
+            text: text,
+            width: width,
+            height: height,
+            blurHash: blurHash
+        )
     }
 }
 

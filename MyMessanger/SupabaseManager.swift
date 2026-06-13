@@ -12,8 +12,8 @@ final class SupabaseManager: @unchecked Sendable {
     static let shared = SupabaseManager()
     
     // URL и anon-ключ вынесены в SupabaseConfig (обход блокировок РКН — см. analysis-reports/).
-    // По умолчанию хост = прямой адрес проекта, поэтому поведение идентично прежнему,
-    // пока в SupabaseConfig.hostCandidates не добавлен прокси-домен.
+    // Базовый хост = первый из SupabaseConfig.hostCandidates (сейчас реверс-прокси i-goose.pro);
+    // прямой адрес Supabase остаётся в списке как fallback (Wi-Fi / вне РФ).
     let client = SupabaseClient(
         supabaseURL: SupabaseConfig.currentURL,
         supabaseKey: SupabaseConfig.anonKey,

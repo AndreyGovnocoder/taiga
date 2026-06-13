@@ -85,11 +85,11 @@ class DatabaseService {
         if type == "text" {
             return .text(text ?? "")
         } else {
-            guard let original = URL(string: imageUrl ?? "") else {
+            guard let original = SupabaseConfig.rewrittenURL(fromStored: imageUrl) else {
                 // Битый/непарсимый URL картинки с сервера — деградируем в текст, а не крашимся.
                 return .text(text ?? "")
             }
-            let thumb = thumbUrl.flatMap { URL(string: $0) }
+            let thumb = SupabaseConfig.rewrittenURL(fromStored: thumbUrl)
             return .image(imageURL: original, thumbURL: thumb, text: text, width: width, height: height, blurHash: blurHash)
         }
     }

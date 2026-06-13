@@ -75,7 +75,7 @@ class SupabaseChatService: ChatServiceProtocol {
                 phoneNumber: uDTO.phone_number ?? "",
                 name: uDTO.name,
                 nickname: uDTO.nickname ?? "",
-                avatarURL: uDTO.avatar_url != nil ? URL(string: uDTO.avatar_url!) : nil,
+                avatarURL: SupabaseConfig.rewrittenURL(fromStored: uDTO.avatar_url),
                 isOnline: uDTO.is_online
             )
             context.insert(userDB)
@@ -90,7 +90,7 @@ class SupabaseChatService: ChatServiceProtocol {
             
             let type: ChatType = cDTO.type == "personal"
             ? .personal
-            : .group(name: cDTO.name ?? "Группа", avatarURL: cDTO.avatar_url != nil ? URL(string: cDTO.avatar_url!) : nil)
+            : .group(name: cDTO.name ?? "Группа", avatarURL: SupabaseConfig.rewrittenURL(fromStored: cDTO.avatar_url))
             
             let chatDB = ChatDB(
                 id: cDTO.id.uuidString.lowercased(),
@@ -1303,11 +1303,11 @@ class SupabaseChatService: ChatServiceProtocol {
         if type == "text" {
             return .text(text ?? "")
         } else {
-            guard let original = URL(string: imageUrl ?? "") else {
+            guard let original = SupabaseConfig.rewrittenURL(fromStored: imageUrl) else {
                 // Битый/непарсимый URL картинки с сервера — деградируем в текст, а не крашимся.
                 return .text(text ?? "")
             }
-            let thumb = thumbUrl.flatMap { URL(string: $0) }
+            let thumb = SupabaseConfig.rewrittenURL(fromStored: thumbUrl)
             return .image(imageURL: original, thumbURL: thumb, text: text, width: width, height: height, blurHash: blurHash)
         }
     }
@@ -1342,7 +1342,7 @@ class SupabaseChatService: ChatServiceProtocol {
                 phoneNumber: uDTO.phone_number ?? "",
                 name: uDTO.name,
                 nickname: uDTO.nickname ?? "",
-                avatar: uDTO.avatar_url != nil ? URL(string: uDTO.avatar_url!) : nil,
+                avatar: SupabaseConfig.rewrittenURL(fromStored: uDTO.avatar_url),
                 isOnline: uDTO.is_online
             )
         }
@@ -1388,7 +1388,7 @@ class SupabaseChatService: ChatServiceProtocol {
                 phoneNumber: uDTO.phone_number ?? "",
                 name: uDTO.name,
                 nickname: uDTO.nickname ?? "",
-                avatar: uDTO.avatar_url != nil ? URL(string: uDTO.avatar_url!) : nil,
+                avatar: SupabaseConfig.rewrittenURL(fromStored: uDTO.avatar_url),
                 isOnline: uDTO.is_online
             )
         }
@@ -1478,7 +1478,7 @@ class SupabaseChatService: ChatServiceProtocol {
         // Перезагружаем чаты для обновления локальной базы
         _ = try await self.fetchChats(context: context)
 
-        guard let url = URL(string: newAvatarURL) else {
+        guard let url = SupabaseConfig.rewrittenURL(fromStored: newAvatarURL) else {
             throw NSError(domain: "ChatService", code: 500, userInfo: [NSLocalizedDescriptionKey: "Некорректный URL аватара"])
         }
         return url
@@ -1542,7 +1542,7 @@ class SupabaseChatService: ChatServiceProtocol {
                 phoneNumber: uDTO.phone_number ?? "",
                 name: uDTO.name,
                 nickname: uDTO.nickname ?? "",
-                avatar: uDTO.avatar_url != nil ? URL(string: uDTO.avatar_url!) : nil,
+                avatar: SupabaseConfig.rewrittenURL(fromStored: uDTO.avatar_url),
                 isOnline: uDTO.is_online
             )
             return (user: user, role: p.role ?? "member")

@@ -7,7 +7,7 @@
 //  (реверс-прокси на своём домене). См. analysis-reports/02-roadmap-to-release.md (Этап 1)
 //  и analysis-reports/03-action-guide.md (шаги 4–7).
 //
-//  ВАЖНО: пока в hostCandidates только прямой адрес проекта, поведение идентично прежнему.
+//  Основной хост — реверс-прокси i-goose.pro (AEZA/Caddy, обход РКН); прямой адрес Supabase — fallback.
 //
 
 import Foundation
@@ -31,7 +31,7 @@ enum SupabaseConfig {
     ///
     /// Список зашит в бинарь специально: смена точки входа НЕ должна требовать релиза в App Store.
     static let hostCandidates: [String] = [
-        // "api.ВАШ-ДОМЕН",            // ← основной реверс-прокси (раскомментировать после настройки сервера)
+        "i-goose.pro",            // ← основной реверс-прокси (AEZA/Caddy, обход РКН)
         // "api.ВАШ-РЕЗЕРВНЫЙ-ДОМЕН",  // ← резервный прокси (другой хостер/страна)
         directHost,                    // прямой адрес (fallback)
     ]
@@ -66,6 +66,31 @@ enum SupabaseConfig {
 
     /// Текущий базовый URL для инициализации SupabaseClient.
     static var currentURL: URL { url(forHost: chosenHost) }
+
+    // MARK: - Переписывание абсолютных медиа-URL на текущий хост
+
+    /// «Наши» хосты, чьи абсолютные URL нужно вести через текущий выбранный хост.
+    private static var knownOwnHosts: Set<String> { Set((hostCandidates + [directHost]).map { $0.lowercased() }) }
+
+    /// Переписывает host у абсолютного Supabase-URL (storage/медиа/аватары) на текущий `chosenHost`.
+    /// Зачем: медиа-URL хранятся в БД абсолютными (getPublicURL().absoluteString) — старые записи
+    /// содержат прямой хост Supabase, заблокированный в РФ. Эта функция ведёт старые и будущие
+    /// ссылки через прокси и делает их устойчивыми к смене VPS. Чужие URL не трогает; Caddy
+    /// проксирует путь как есть — меняется только host.
+    static func rewrittenToCurrentHost(_ url: URL) -> URL {
+        guard let rawHost = url.host else { return url }
+        let host = rawHost.lowercased()
+        guard host != chosenHost.lowercased(), knownOwnHosts.contains(host) else { return url }
+        guard var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        comps.host = chosenHost
+        return comps.url ?? url
+    }
+
+    /// Обёртка для строкового URL-поля из БД (avatar_url / image_url). nil — если строка пустая/битая.
+    static func rewrittenURL(fromStored string: String?) -> URL? {
+        guard let string = string, let url = URL(string: string) else { return nil }
+        return rewrittenToCurrentHost(url)
+    }
 }
 
 // MARK: - Проверка доступности хостов (основа failover)
