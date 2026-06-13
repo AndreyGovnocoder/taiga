@@ -16,11 +16,11 @@ enum SupabaseConfig {
 
     /// Публикуемый (anon) ключ Supabase. По дизайну Supabase он публичный
     /// (предназначен для клиента); защита данных обеспечивается серверным RLS, а не секретностью ключа.
-    static let anonKey = "sb_publishable_XKl70ux3zYBIiodYYowweQ_0ERHg6T1"
+    nonisolated static let anonKey = "sb_publishable_XKl70ux3zYBIiodYYowweQ_0ERHg6T1"
 
     /// Прямой адрес проекта Supabase. На мобильных операторах РФ может быть недоступен
     /// (проект на AWS за Cloudflare попадает под блокировки/троттлинг ТСПУ).
-    static let directHost = "rhoyopwzdqtcyawiipya.supabase.co"
+    nonisolated static let directHost = "rhoyopwzdqtcyawiipya.supabase.co"
 
     /// Упорядоченный список хостов-кандидатов; перебирается сверху вниз при недоступности.
     ///
@@ -30,7 +30,7 @@ enum SupabaseConfig {
     /// Прямой адрес оставить ПОСЛЕДНИМ: в РФ на мобильном он не сработает, но полезен на Wi-Fi и вне РФ.
     ///
     /// Список зашит в бинарь специально: смена точки входа НЕ должна требовать релиза в App Store.
-    static let hostCandidates: [String] = [
+    nonisolated static let hostCandidates: [String] = [
         "i-goose.pro",            // ← основной реверс-прокси (AEZA/Caddy, обход РКН)
         // "api.ВАШ-РЕЗЕРВНЫЙ-ДОМЕН",  // ← резервный прокси (другой хостер/страна)
         directHost,                    // прямой адрес (fallback)
@@ -39,11 +39,11 @@ enum SupabaseConfig {
     /// Хост проекта для upstream-маршрутизации (Host/SNI). НЕ меняется при проксировании —
     /// прокси обязан переписывать заголовок Host и SNI на это значение (см. Caddyfile в инструкции),
     /// иначе Realtime упадёт с tenant_not_found_in_host.
-    static let projectHostForUpstream = directHost
+    nonisolated static let projectHostForUpstream = directHost
 
     // MARK: - Выбранный хост (переживает перезапуск)
 
-    private static let chosenHostKey = "supabaseChosenHost"
+    nonisolated private static let chosenHostKey = "supabaseChosenHost"
 
     /// Текущий выбранный хост. По умолчанию — первый кандидат.
     /// Сохранённое значение игнорируется, если его больше нет в списке кандидатов
