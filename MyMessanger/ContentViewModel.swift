@@ -120,16 +120,20 @@ class ContentViewModel {
     /// что поднимало второй `client.channel("global_messages")` → дубль INSERT-хендлеров →
     /// самоусиливающийся цикл рестартов. Теперь — одна `globalSubscriptionTask`.
     ///
-    /// Бездедлочно: старую задачу отменяем и НЕ ждём её `.value`. На мёртвом сокете teardown
-    /// канала (#4, `unsubscribe` без таймаута в SDK) мог бы зависнуть — ожидание привело бы
-    /// к дедлоку, поэтому новая подписка стартует, не дожидаясь завершения старой.
+    /// Перед новой подпиской дожидаемся ПОЛНОГО снятия прошлой (`await previous.value`):
+    /// иначе `client.channel("global_messages")` (идемпотентен по topic) переиспользует ещё
+    /// не убранный из реестра канал → два INSERT-обработчика. Ожидание безопасно — teardown
+    /// в `subscribeToAllChats` ограничен по времени (watchdog в `teardownChannel`), дедлока на
+    /// зависающем `unsubscribe()` (#4) больше нет.
     @MainActor
     func ensureGlobalSubscription(context: ModelContext) {
         setupObservers(context: context)
 
-        globalSubscriptionTask?.cancel()
+        let previous = globalSubscriptionTask
+        previous?.cancel()
         globalSubscriptionTask = Task { @MainActor [weak self] in
-            guard let self else { return }
+            _ = await previous?.value
+            guard let self, !Task.isCancelled else { return }
             // Переподключаем realtime (WebSocket мог умереть во сне)
             await self.chatService.reconnectRealtime()
             if Task.isCancelled { return }

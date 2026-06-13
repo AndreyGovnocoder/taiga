@@ -23,6 +23,28 @@ class SupabaseChatService: ChatServiceProtocol {
         await client.realtimeV2.connect()
         print("СЕРВЕР: Realtime переподключен")
     }
+
+    /// Снимает realtime-канал, НЕ зависая на мёртвом сокете.
+    ///
+    /// `RealtimeChannelV2.unsubscribe()` ждёт серверного подтверждения `.unsubscribed`
+    /// (`await statusChange.first { … }`) — на оборванном сокете оно не приходит, и вызов
+    /// висит вечно (отложенный #4). Внутренний `.first` по AsyncStream cancellation-aware,
+    /// поэтому watchdog по таймауту прерывает зависший teardown; затем `removeChannel`
+    /// убирает канал из реестра клиента. Это критично: `client.channel(topic)` идемпотентен
+    /// по topic — застрявший канал был бы переиспользован следующей переподпиской, и realtime
+    /// оставался бы мёртвым до перезапуска приложения.
+    private func teardownChannel(_ channel: RealtimeChannelV2) async {
+        let teardown = Task { @MainActor in
+            await channel.unsubscribe()
+            await client.removeChannel(channel)
+        }
+        let watchdog = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            teardown.cancel()
+        }
+        await teardown.value
+        watchdog.cancel()
+    }
     
     func fetchChats(context: ModelContext) async throws -> [Chat] {
         let session = try await client.auth.session
@@ -904,17 +926,15 @@ class SupabaseChatService: ChatServiceProtocol {
             AnyAction.self, schema: "public", table: "message_events"
         )
         
-        try await channel.subscribeWithError()
-        print("СЕРВЕР DEBUG: Подписались на канал global_messages!")
-        
-        // Cleanup при завершении (отмена задачи, ошибка, etc.)
-        defer {
-            Task {
-                await channel.unsubscribe()
-                await client.removeChannel(channel)
-                print("СЕРВЕР DEBUG: Отписались от глобального канала")
-            }
+        do {
+            try await channel.subscribeWithError()
+        } catch {
+            // Подписка не удалась — снять полуживой канал из реестра клиента
+            // (client.channel(topic) идемпотентен по topic), иначе застрянет. teardown ограничен.
+            await teardownChannel(channel)
+            throw error
         }
+        print("СЕРВЕР DEBUG: Подписались на канал global_messages!")
         
         // Параллельно слушаем оба стрима — for await выполняется на MainActor,
         // decode происходит внутри SDK до передачи в стрим — нет nonisolated проблемы
@@ -992,6 +1012,13 @@ class SupabaseChatService: ChatServiceProtocol {
                 }
             }
         }
+
+        // Teardown ПОСЛЕ завершения обработки потоков (отмена задачи владельцем или
+        // нормальный выход). for await по postgresChange (AsyncStream) сам завершается при
+        // отмене задачи → withTaskGroup возвращается. Ограниченный teardown гарантирует, что
+        // канал убран из реестра клиента ДО следующей переподписки (см. teardownChannel).
+        await teardownChannel(channel)
+        print("СЕРВЕР DEBUG: Отписались от глобального канала")
     }
     
     func markChatAsRead(chatId: String, context: ModelContext) async throws {
