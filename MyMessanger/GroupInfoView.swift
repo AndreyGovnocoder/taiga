@@ -18,7 +18,9 @@ struct GroupInfoView: View {
     @Environment(\.modelContext) private var context
     
     let chat: Chat
-    
+    /// Закрыть и сам групповой чат (pop из стека) — например после выхода из группы.
+    var onChatClosed: () -> Void = {}
+
     @State private var participants: [(user: User, role: String)] = []
     @State private var isLoading: Bool = true
     @State private var isMuted: Bool = false
@@ -361,8 +363,12 @@ struct GroupInfoView: View {
         Task {
             do {
                 try await chatService.removeGroupParticipant(chatId: chat.id, userId: currentUserId)
-                // TODO: Удалить чат из локального кэша и закрыть экран
-                dismiss()
+                // Сервер-сначала: вышли из группы → чистим локальный кэш чата (сообщения,
+                // ChatDB, медиа). Best-effort: ошибка локальной зачистки не должна оставлять
+                // открытым экран уже покинутой группы.
+                try? await chatService.deleteChat(chatId: chat.id, context: context)
+                dismiss()        // закрываем лист GroupInfoView
+                onChatClosed()   // закрываем и сам групповой чат (pop), иначе застрянем на удалённом
             } catch {
                 errorMessage = "Ошибка выхода из группы: \(error.localizedDescription)"
             }

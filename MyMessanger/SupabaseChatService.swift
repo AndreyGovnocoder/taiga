@@ -1067,7 +1067,67 @@ class SupabaseChatService: ChatServiceProtocol {
             }
         }
     }
-    
+
+    // MARK: - Chat management (local)
+
+    /// Полное локальное удаление чата: все сообщения, сам ChatDB и файлы медиа из LocalCache.
+    /// Сервер НЕ трогаем (нет RPC удаления для 1:1; чат вернётся пустым при новом сообщении —
+    /// штатная семантика «удалить переписку»). Аватары и медиа других чатов не затрагиваются:
+    /// удаляем только ключи кэша из image-сообщений ЭТОГО чата.
+    func deleteChat(chatId: String, context: ModelContext) async throws {
+        let cId = chatId
+
+        // 1. Собираем ключи кэша медиа (original + thumb) ДО удаления строк — после
+        //    context.delete() контент будет недоступен.
+        let msgDesc = FetchDescriptor<MessageDB>(predicate: #Predicate<MessageDB> { $0.chatId == cId })
+        let msgs = (try? context.fetch(msgDesc)) ?? []
+        var cacheKeys: [String] = []
+        for m in msgs {
+            if case .image(let url, let thumbURL, _, _, _, _) = m.content {
+                cacheKeys.append(url.lastPathComponent)
+                if let thumbName = thumbURL?.lastPathComponent {
+                    cacheKeys.append(thumbName)
+                }
+            }
+        }
+
+        // 2. Удаляем локальные сообщения и сам чат. save() → ModelContext.didSave →
+        //    ContentViewModel.reloadLocal убирает строку из списка автоматически.
+        for m in msgs { context.delete(m) }
+        let chatDesc = FetchDescriptor<ChatDB>(predicate: #Predicate<ChatDB> { $0.id == cId })
+        if let chatDB = try? context.fetch(chatDesc).first {
+            context.delete(chatDB)
+        }
+        try context.save()
+
+        // 3. Чистим файлы медиа этого чата (mem+disk). Best-effort, на UI уже не влияет.
+        for key in cacheKeys {
+            await LocalCache.shared.delete(forKey: key)
+        }
+    }
+
+    /// «Очистить чат»: мягкое скрытие всех видимых сообщений (isHiddenLocally = true) +
+    /// сброс snapshot. Единый источник для настроек хранилища и экрана профиля чата.
+    @discardableResult
+    func clearChat(chatId: String, context: ModelContext) throws -> Int {
+        let cId = chatId
+        let descriptor = FetchDescriptor<MessageDB>(
+            predicate: #Predicate<MessageDB> { $0.chatId == cId && $0.isHiddenLocally == false }
+        )
+        let messages = try context.fetch(descriptor)
+        for message in messages {
+            message.isHiddenLocally = true
+        }
+        // Сначала сохраняем — чтобы #Predicate в updateSnapshot видел актуальный isHiddenLocally.
+        try context.save()
+        let chatDesc = FetchDescriptor<ChatDB>(predicate: #Predicate<ChatDB> { $0.id == cId })
+        if let chat = try? context.fetch(chatDesc).first {
+            chat.updateSnapshot(context: context)
+        }
+        try context.save()
+        return messages.count
+    }
+
     func sendMediaMessages(chatId: String, datas: [Data], text: String?, replyToMessageId: String?, threadRootId: String?, context: ModelContext) async {
         let myUserIdStr = SupabaseManager.shared.currentUserId ?? ""
         
@@ -1621,6 +1681,9 @@ class SupabaseChatService: ChatServiceProtocol {
         // (применение идемпотентно). Иначе delete-for-everyone/edited молча терялись.
         var appliedPrefixCursor: String? = nil
         var sawSkip = false
+        // Чаты, чьё последнее сообщение могло измениться (edit/delete) — для пересчёта
+        // денормализованного snapshot превью (см. ниже).
+        var affectedChatIds = Set<String>()
 
         for event in events {
             let msgId = event.message_id.uuidString.lowercased()
@@ -1629,7 +1692,8 @@ class SupabaseChatService: ChatServiceProtocol {
                 sawSkip = true
                 continue
             }
-            
+            affectedChatIds.insert(event.chat_id.uuidString.lowercased())
+
             switch event.event_type {
             case "deleted":
                 // Если событие от текущего пользователя — полное удаление,
@@ -1658,6 +1722,22 @@ class SupabaseChatService: ChatServiceProtocol {
         }
 
         try? context.save()
+
+        // Денормализованный snapshot превью (lastMessageText/Type/At в ChatDB) пересчитывается
+        // ТОЛЬКО в fetchChats.updateSnapshot. Так как syncMessageEvents теперь идёт ПОСЛЕ
+        // fetchChats (нюанс «список оживает через ~2с»), превью уже посчитано по старому
+        // сообщению — поэтому сами пересчитываем snapshot затронутых чатов, иначе превью
+        // последнего отредактированного/удалённого сообщения осталось бы устаревшим до
+        // следующего полного цикла. Заодно закрывает ту же дыру для realtime-пути.
+        if !affectedChatIds.isEmpty {
+            for cId in affectedChatIds {
+                let chatDesc = FetchDescriptor<ChatDB>(predicate: #Predicate<ChatDB> { $0.id == cId })
+                if let chatDB = try? context.fetch(chatDesc).first {
+                    chatDB.updateSnapshot(context: context)
+                }
+            }
+            try? context.save()
+        }
 
         // Курсор — на последнее событие непрерывно-применённого префикса. Если первое же
         // событие пропущено (нет локального сообщения) — курсор НЕ двигаем, повторим позже.

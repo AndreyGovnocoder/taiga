@@ -53,7 +53,17 @@ protocol ChatServiceProtocol {
     @MainActor func fetchMessagesByIds(_ ids: [String], context: ModelContext) async throws
     @MainActor func fetchRegisteredContacts(phoneNumbers: [String]) async throws -> [User]
     @MainActor func createOrGetPersonalChat(with targetUserId: String, context: ModelContext) async throws -> Chat
-    
+
+    // MARK: - Chat management (local)
+    /// Полностью удаляет чат с УСТРОЙСТВА: все сообщения (MessageDB), сам ChatDB и файлы
+    /// медиа этого чата из LocalCache. Сервер НЕ трогает (чат вернётся пустым, если
+    /// собеседник пришлёт новое сообщение). Аватары и медиа других чатов не затрагиваются.
+    @MainActor func deleteChat(chatId: String, context: ModelContext) async throws
+    /// «Очистить чат»: мягко скрывает все видимые сообщения (isHiddenLocally = true) и
+    /// сбрасывает snapshot последнего сообщения. На сервере сообщения сохраняются (то же
+    /// поведение, что и «Очистить весь чат» в настройках хранилища). Возвращает число скрытых.
+    @MainActor @discardableResult func clearChat(chatId: String, context: ModelContext) throws -> Int
+
     // MARK: - Group Chat
     @MainActor func createGroupChat(name: String, avatarURL: URL?, participantIds: [String], context: ModelContext) async throws -> Chat
     @MainActor func updateGroupAvatar(chatId: String, avatarData: Data, context: ModelContext) async throws -> URL

@@ -246,9 +246,11 @@ struct ChatStorageRow: View {
 
 struct ChatStorageDetailView: View {
     let chatInfo: ChatStorageInfo
-    
+
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+
+    private let chatService: ChatServiceProtocol = SupabaseChatService()
     
     @State private var showClearAllConfirmation = false
     @State private var showClearMediaConfirmation = false
@@ -406,32 +408,16 @@ struct ChatStorageDetailView: View {
     
     // MARK: - Логика очистки
     
-    /// Скрыть все сообщения в чате (isHiddenLocally = true)
+    /// Скрыть все сообщения в чате (isHiddenLocally = true).
+    /// Единый источник логики — ChatServiceProtocol.clearChat (та же логика на экране профиля чата).
     private func clearAllMessages() {
         isProcessing = true
-        let chatId = chatInfo.id
-        
-        let descriptor = FetchDescriptor<MessageDB>(
-            predicate: #Predicate<MessageDB> { $0.chatId == chatId && $0.isHiddenLocally == false }
-        )
-        
         do {
-            let messages = try context.fetch(descriptor)
-            let count = messages.count
-            
-            for message in messages {
-                message.isHiddenLocally = true
-            }
-            
-            // Сначала сохраняем — чтобы #Predicate в updateSnapshot видел актуальный isHiddenLocally
-            try context.save()
-            updateChatSnapshot(chatId: chatId)
-            try context.save()
+            let count = try chatService.clearChat(chatId: chatInfo.id, context: context)
             resultMessage = "Скрыто сообщений: \(count)"
         } catch {
             resultMessage = "Ошибка: \(error.localizedDescription)"
         }
-        
         isProcessing = false
     }
     

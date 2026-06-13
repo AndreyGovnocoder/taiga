@@ -24,6 +24,7 @@ struct ContentView: View
     @State private var showContactsSheet: Bool = false
     @State private var showCreateGroupSheet: Bool = false
     @State private var navigateToChat: Chat? = nil
+    @State private var chatToDelete: Chat? = nil
     
     @State private var showSyncStatus: Bool = true
     @State private var syncStatusTask: Task<Void, Never>? = nil
@@ -147,6 +148,9 @@ struct ContentView: View
                         self.navigateToChat = createdChat
                     }
                 }
+                // Sheet перекрывает список → он не «виден» (счётчики скрыты), не подавляем баннер.
+                .onAppear { SupabaseManager.shared.isChatListVisible = false }
+                .onDisappear { SupabaseManager.shared.isChatListVisible = true }
             }
             .sheet(isPresented: $showCreateGroupSheet) {
                 CreateGroupView { createdChat in
@@ -155,9 +159,13 @@ struct ContentView: View
                         self.navigateToChat = createdChat
                     }
                 }
+                .onAppear { SupabaseManager.shared.isChatListVisible = false }
+                .onDisappear { SupabaseManager.shared.isChatListVisible = true }
             }
             .sheet(isPresented: $showSettingsSheet) {
                 SettingsView()
+                    .onAppear { SupabaseManager.shared.isChatListVisible = false }
+                    .onDisappear { SupabaseManager.shared.isChatListVisible = true }
             }
             .onChange(of: viewModel.isLoading) { oldValue, newValue in
                 if newValue {
@@ -198,6 +206,28 @@ struct ContentView: View
                 viewModel.stopGlobalSubscription()
             }
         }
+        // Список чатов на экране → подавляем foreground-баннер (новое сообщение видно
+        // по счётчику). Push-делегат дополнительно проверяет activeChatId == nil, поэтому
+        // переход в чат (ContentView остаётся в стеке, isChatListVisible не сбрасывается)
+        // не ломает баннеры для других чатов. Сброс на onDisappear = выход/смена аккаунта.
+        .onAppear { SupabaseManager.shared.isChatListVisible = true }
+        .onDisappear { SupabaseManager.shared.isChatListVisible = false }
+        .confirmationDialog(
+            "Удалить чат?",
+            isPresented: Binding(
+                get: { chatToDelete != nil },
+                set: { if !$0 { chatToDelete = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: chatToDelete
+        ) { chat in
+            Button("Удалить безвозвратно", role: .destructive) {
+                Task { await viewModel.deleteChat(chat, context: context) }
+            }
+            Button("Отмена", role: .cancel) { }
+        } message: { _ in
+            Text("Чат, все его сообщения и медиа будут удалены с этого устройства без возможности восстановления.")
+        }
     }
     
     @ViewBuilder
@@ -210,7 +240,16 @@ struct ContentView: View
                     }
                     .buttonStyle(.plain)
                     .transition(.opacity.combined(with: .move(edge: .top)))
-                    
+                    // Контекстное меню (long-press): надёжно работает в ScrollView/LazyVStack
+                    // (в отличие от .swipeActions — это API List). Удаление — с подтверждением.
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            chatToDelete = chat
+                        } label: {
+                            Label("Удалить чат", systemImage: "trash")
+                        }
+                    }
+
                     Divider()
                         .padding(.leading, 76)
                 }

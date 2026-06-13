@@ -59,11 +59,12 @@ struct ChatDetailView: View {
     
     @State private var showDeleteError: Bool = false
     @State private var showGroupInfo: Bool = false
+    @State private var showChatInfo: Bool = false
     @State private var showSavedToast: Bool = false
 
-    // UGC-модерация
+    // UGC-модерация (жалоба на отдельное сообщение из контекст-меню ячейки).
+    // Жалоба/блокировка собеседника переехали на экран профиля (ChatInfoView).
     @State private var reportTargetMessage: Message?
-    @State private var showBlockConfirm: Bool = false
     @State private var moderationNotice: String?
 
     init(chat: Chat) {
@@ -96,7 +97,15 @@ struct ChatDetailView: View {
             .toolbar(fullscreenItem != nil ? .hidden : .visible, for: .navigationBar)
             .toolbar { toolbarContent }
             .sheet(isPresented: $showGroupInfo) {
-                GroupInfoView(chat: chat)
+                GroupInfoView(chat: chat, onChatClosed: { dismiss() })
+            }
+            .sheet(isPresented: $showChatInfo) {
+                ChatInfoView(
+                    chat: chat,
+                    interlocutor: interlocutor,
+                    onChatCleared: { viewModel.refreshWindow() },
+                    onChatClosed: { dismiss() }
+                )
             }
             .confirmationDialog("Пожаловаться на сообщение?", isPresented: Binding(
                 get: { reportTargetMessage != nil },
@@ -108,18 +117,6 @@ struct ChatDetailView: View {
                 Button("Отмена", role: .cancel) { }
             } message: {
                 Text("Жалоба будет отправлена на модерацию.")
-            }
-            .confirmationDialog(
-                interlocutor.map { "Заблокировать \($0.name)?" } ?? "Заблокировать?",
-                isPresented: $showBlockConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("Заблокировать", role: .destructive) {
-                    if let user = interlocutor { blockInterlocutor(user) }
-                }
-                Button("Отмена", role: .cancel) { }
-            } message: {
-                Text("Вы больше не будете видеть сообщения этого пользователя.")
             }
             .alert("Готово", isPresented: Binding(
                 get: { moderationNotice != nil },
@@ -258,26 +255,8 @@ struct ChatDetailView: View {
                 principalToolbarLabel
             }
         }
-        // UGC-модерация: меню «…» с жалобой/блокировкой собеседника (только 1:1;
-        // для групп эти действия живут в GroupInfoView на участнике).
-        if !isSelectionMode && !chat.isGroup {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button {
-                        if let user = interlocutor { reportUser(user) }
-                    } label: {
-                        Label("Пожаловаться", systemImage: "exclamationmark.bubble")
-                    }
-                    Button(role: .destructive) {
-                        showBlockConfirm = true
-                    } label: {
-                        Label("Заблокировать", systemImage: "hand.raised")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-            }
-        }
+        // Жалоба/блокировка собеседника переехали из меню «…» на экран профиля чата
+        // (тап по аватарке/имени в шапке → ChatInfoView). Для групп — GroupInfoView.
         if isSelectionMode {
             ToolbarItem(placement: .topBarLeading) {
                 Button("Отмена") {
@@ -309,11 +288,15 @@ struct ChatDetailView: View {
                 }
             }
         } else {
-            HStack(spacing: 8) {
-                personalChatAvatar
-                Text(chat.displayTitle)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
+            Button {
+                showChatInfo = true
+            } label: {
+                HStack(spacing: 8) {
+                    personalChatAvatar
+                    Text(chat.displayTitle)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                }
             }
         }
     }
@@ -363,6 +346,8 @@ struct ChatDetailView: View {
     // MARK: - Lifecycle Handlers
     
     private func handleOnAppear() {
+        // Открыт этот чат → подавляем foreground-пуш по нему (сообщение и так в ленте).
+        SupabaseManager.shared.activeChatId = chat.id
         viewModel.setup(context: context)
         Task {
             await viewModel.loadInitial()
@@ -371,8 +356,10 @@ struct ChatDetailView: View {
             await viewModel.markAsRead()
         }
     }
-    
+
     private func handleOnDisappear() {
+        // Чат закрыт (pop/блокировка) — снова разрешаем баннеры по нему.
+        SupabaseManager.shared.activeChatId = nil
         Task { await viewModel.markAsRead() }
     }
     
@@ -812,30 +799,6 @@ struct ChatDetailView: View {
                 moderationNotice = "Жалоба отправлена. Спасибо."
             } catch {
                 moderationNotice = "Не удалось отправить жалобу. Попробуйте позже."
-            }
-        }
-    }
-
-    private func reportUser(_ user: User) {
-        Task {
-            do {
-                try await viewModel.chatService.reportUser(userId: user.id, reason: "Жалоба на пользователя")
-                moderationNotice = "Жалоба отправлена. Спасибо."
-            } catch {
-                moderationNotice = "Не удалось отправить жалобу. Попробуйте позже."
-            }
-        }
-    }
-
-    private func blockInterlocutor(_ user: User) {
-        Task {
-            do {
-                try await viewModel.chatService.blockUser(user.id)
-                // Обновляем список чатов, чтобы скрытый 1:1 с заблокированным исчез сразу.
-                NotificationCenter.default.post(name: .newChatDetected, object: nil)
-                dismiss()
-            } catch {
-                moderationNotice = "Не удалось заблокировать. Попробуйте позже."
             }
         }
     }

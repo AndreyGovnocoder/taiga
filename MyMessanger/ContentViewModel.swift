@@ -53,16 +53,17 @@ class ContentViewModel {
         await chatService.retryPendingMessages(context: context)
 
         do {
-            // 0. UGC-модерация: обновляем набор заблокированных (для фильтрации чатов/сообщений/контактов).
-            //    try? — сбой модерации не должен ломать загрузку чатов.
+            // UGC-модерация: обновляем набор заблокированных (для фильтрации чатов/сообщений/
+            // контактов) — ДО fetchChats, влияет на фильтрацию. try? — сбой модерации не
+            // должен ломать загрузку чатов.
             _ = try? await chatService.fetchBlockedUsers()
 
-            // 4. Синхронизируем пропущенные events (удаления/редактирования) перед загрузкой чатов
-            try? await chatService.syncMessageEvents(context: context)
-
-            // 5. Загружаем свежие данные о чатах с сервера — с авто-retry на ТРАНЗИЕНТНЫХ
-            //    сетевых сбоях (флапающая/throttled сеть, таймаут по полузависшему сокету).
-            //    fetchChats идемпотентен (зовётся на каждый refresh) → повтор безопасен.
+            // Свежие данные о чатах с сервера — с авто-retry на ТРАНЗИЕНТНЫХ сетевых сбоях
+            // (флапающая/throttled сеть, таймаут по полузависшему сокету). fetchChats
+            // идемпотентен (зовётся на каждый refresh) → повтор безопасен.
+            // ВАЖНО: идёт ДО syncMessageEvents — это дешёвый денормализованный запрос
+            // (последнее сообщение/счётчики), и видимый список должен обновиться сразу, не
+            // дожидаясь сканирования message_events (иначе нюанс «список оживает через ~2с»).
             var attempt = 1
             while true {
                 do {
@@ -86,11 +87,19 @@ class ContentViewModel {
                 return
             }
 
-            // 6. Обновляем UI свежими данными
+            // Список виден сразу свежими данными.
             self.reloadLocal(context: context)
 
             withAnimation {
                 self.isLoading = false
+            }
+
+            // Догонка пропущенных events (удаления/редактирования) — ПОСЛЕ показа списка,
+            // чтобы скан message_events не задерживал видимый рефреш. Применённые изменения
+            // подтянутся в UI через ModelContext.didSave; явный reloadLocal — страховка.
+            if !Task.isCancelled {
+                try? await chatService.syncMessageEvents(context: context)
+                self.reloadLocal(context: context)
             }
         } catch {
             if Task.isCancelled || (error as NSError).code == URLError.cancelled.rawValue {
@@ -148,14 +157,15 @@ class ContentViewModel {
                 self?.reloadLocal(context: context)
             }
 
-        // 2. Входящие сообщения от DatabaseService actor
-        // Задержка 0.3с даёт SQLite время записать данные, чтобы main context их увидел
+        // 2. Входящие сообщения от DatabaseService. Сохранение идёт на ТОТ ЖЕ mainContext
+        //    (DatabaseService(context: container.mainContext)) и завершается (modelContext.save())
+        //    ДО отправки .newMessageSaved, поэтому reloadLocal сразу видит новые строки —
+        //    прежняя задержка 0.3с (воркэраунд видимости SQLite) не нужна и лишь добавляла
+        //    лаг. К тому же save дополнительно триггерит ModelContext.didSave → reloadLocal.
         newMessageSubscription = NotificationCenter.default.publisher(for: .newMessageSaved)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    self?.reloadLocal(context: context)
-                }
+                self?.reloadLocal(context: context)
             }
 
         // 3. Обнаружен новый чат — перезагружаем с сервера и переподписываемся
@@ -193,6 +203,18 @@ class ContentViewModel {
             }
         } catch {
             print("Ошибка чтения локальных чатов: \(error)")
+        }
+    }
+
+    /// Удаляет чат с устройства (сообщения + ChatDB + медиа из кэша) и обновляет список.
+    /// Локально-только: чат вернётся пустым, если собеседник пришлёт новое сообщение.
+    @MainActor
+    func deleteChat(_ chat: Chat, context: ModelContext) async {
+        do {
+            try await chatService.deleteChat(chatId: chat.id, context: context)
+            reloadLocal(context: context)
+        } catch {
+            print("Ошибка удаления чата: \(error)")
         }
     }
 }

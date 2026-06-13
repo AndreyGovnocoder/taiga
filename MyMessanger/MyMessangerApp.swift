@@ -98,9 +98,25 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         print("СЕРВЕР: Не удалось получить Device Token: \(error.localizedDescription)")
     }
     
-    // Показывать пуш, даже если приложение открыто
+    // Foreground-показ пуша. Вызывается ТОЛЬКО когда приложение активно — поэтому флаги
+    // SupabaseManager.shared всегда отражают текущий видимый экран.
+    // - Открыт именно этот чат → без баннера/звука, но ОСТАВЛЯЕМ .badge: сообщение уже
+    //   в ленте, при этом серверный totalBadge применяется (markAsRead сам не всегда
+    //   срабатывает, если пользователь проскроллен вверх) — бейдж не уходит в недосчёт.
+    // - Открыт список чатов (и ни один чат не открыт) → только бейдж, баннер лишний
+    //   (новое сообщение уже видно по счётчику чата).
+    // - Иначе (открыт ДРУГОЙ чат / прочий экран) → обычный баннер.
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        let info = notification.request.content.userInfo
+        let pushChatId = (info["chat_id"] as? String)?.lowercased()
+
+        if let pushChatId, pushChatId == SupabaseManager.shared.activeChatId {
+            return [.badge]
+        }
+        if SupabaseManager.shared.activeChatId == nil && SupabaseManager.shared.isChatListVisible {
+            return [.badge]
+        }
         return [.banner, .sound, .badge, .list]
     }
     

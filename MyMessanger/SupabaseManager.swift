@@ -99,6 +99,29 @@ final class SupabaseManager: @unchecked Sendable {
         setBlockedUserIds(ids)
     }
 
+    // MARK: - Активный экран (подавление foreground-пуша)
+
+    /// Какой чат сейчас открыт (lowercase UUID) и виден ли список чатов.
+    /// Пишутся из view-lifecycle на MainActor, читаются из делегата уведомлений
+    /// (willPresent) — поэтому под локом (иначе data race под strict concurrency).
+    /// willPresent дёргается ТОЛЬКО в foreground, так что значения всегда отражают
+    /// текущий видимый экран (на фоне баннер показывает сама система, минуя делегат).
+    private let screenStateLock = NSLock()
+    private var _activeChatId: String?
+    private var _isChatListVisible: Bool = false
+
+    /// ID открытого чата (lowercase). nil — ни один чат не открыт.
+    var activeChatId: String? {
+        get { screenStateLock.withLock { _activeChatId } }
+        set { screenStateLock.withLock { _activeChatId = newValue?.lowercased() } }
+    }
+
+    /// Виден ли список чатов (любая из вкладок «Все/Личные/Группы»).
+    var isChatListVisible: Bool {
+        get { screenStateLock.withLock { _isChatListVisible } }
+        set { screenStateLock.withLock { _isChatListVisible = newValue } }
+    }
+
     private init() {}
 }
 
