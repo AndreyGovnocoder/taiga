@@ -34,16 +34,24 @@ class SupabaseChatService: ChatServiceProtocol {
     /// по topic — застрявший канал был бы переиспользован следующей переподпиской, и realtime
     /// оставался бы мёртвым до перезапуска приложения.
     private func teardownChannel(_ channel: RealtimeChannelV2) async {
-        let teardown = Task { @MainActor in
-            await channel.unsubscribe()
-            await client.removeChannel(channel)
-        }
+        // 1. Ограниченный unsubscribe: он синхронно ставит status = .unsubscribing, затем ждёт
+        //    серверного .unsubscribed (`await statusChange.first{…}` по AsyncStream — отмена
+        //    прерывает). На мёртвом сокете подтверждение не приходит → watchdog отменяет задачу
+        //    по таймауту, и unsubscribe() возвращается.
+        let unsubscribe = Task { @MainActor in await channel.unsubscribe() }
         let watchdog = Task { @MainActor in
             try? await Task.sleep(for: .seconds(3))
-            teardown.cancel()
+            unsubscribe.cancel()
         }
-        await teardown.value
+        await unsubscribe.value
         watchdog.cancel()
+
+        // 2. БЕЗУСЛОВНО убираем канал из реестра клиента — в отдельной (не отменяемой) задаче,
+        //    чтобы отменённый вызывающий контекст это не пропустил. К этому моменту status уже
+        //    .unsubscribing (не .subscribed) → removeChannel пропускает свой внутренний
+        //    unsubscribe и не виснет. Без снятия следующая переподписка переиспользовала бы
+        //    мёртвый канал — client.channel(topic) идемпотентен по topic.
+        await Task { @MainActor in await client.removeChannel(channel) }.value
     }
     
     func fetchChats(context: ModelContext) async throws -> [Chat] {
