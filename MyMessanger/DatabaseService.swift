@@ -18,7 +18,7 @@ class DatabaseService {
     }
     
     func saveIncomingMessage(dto: RealtimeMessageDTO, currentUserId: String) throws {
-        Log.debug(.db, "БД: 🔥 Начинаем сохранение сообщения \(dto.id) от \(dto.sender_id)")
+        Log.debug(.db, "БД: 🔥 Начинаем сохранение сообщения \(dto.id)")
         // Все UUID в lowercase — Postgres/Supabase хранит lowercase,
         // а Swift UUID.uuidString.lowercased() возвращает UPPERCASE
         let msgId = dto.id.uuidString.lowercased()

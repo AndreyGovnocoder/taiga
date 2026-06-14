@@ -1444,7 +1444,7 @@ class SupabaseChatService: ChatServiceProtocol {
                     guard let msgUUID = UUID(uuidString: msgIdStr),
                           let chatUUID = UUID(uuidString: chatId),
                           let senderUUID = UUID(uuidString: myUserIdStr) else {
-                        Log.error(.media, "MEDIA: Invalid UUID — msgId: \(msgIdStr), chatId: \(chatId), sender: \(myUserIdStr)")
+                        Log.error(.media, "MEDIA: Invalid UUID — msgId: \(msgIdStr), chatId: \(chatId)")
                         return
                     }
 
