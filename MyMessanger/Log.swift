@@ -71,22 +71,22 @@ enum Log {
     }
 
     /// Отладочная «крошка». В Release не персистится; в консоли видна при подключённом отладчике.
-    nonisolated static func debug(_ category: Category, _ message: @autoclosure () -> String) {
+    nonisolated static func debug(_ category: Category, _ message: @autoclosure @escaping () -> String) {
         logger(for: category).debug("\(message(), privacy: .public)")
     }
 
     /// Информационное событие (операционная веха, напр. результат sync).
-    nonisolated static func info(_ category: Category, _ message: @autoclosure () -> String) {
+    nonisolated static func info(_ category: Category, _ message: @autoclosure @escaping () -> String) {
         logger(for: category).info("\(message(), privacy: .public)")
     }
 
     /// Заметное, но не ошибочное событие (стоит видеть в Release-логах).
-    nonisolated static func notice(_ category: Category, _ message: @autoclosure () -> String) {
+    nonisolated static func notice(_ category: Category, _ message: @autoclosure @escaping () -> String) {
         logger(for: category).notice("\(message(), privacy: .public)")
     }
 
     /// Ошибка (сохраняется, помечается уровнем error в Console).
-    nonisolated static func error(_ category: Category, _ message: @autoclosure () -> String) {
+    nonisolated static func error(_ category: Category, _ message: @autoclosure @escaping () -> String) {
         logger(for: category).error("\(message(), privacy: .public)")
     }
 }
