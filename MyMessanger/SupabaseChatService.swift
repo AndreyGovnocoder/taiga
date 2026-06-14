@@ -924,7 +924,21 @@ class SupabaseChatService: ChatServiceProtocol {
         // currentUserId НЕ захватываем здесь — читаем живьём в каждом обработчике (ниже):
         // если за сессию был logout→login, захваченное значение указывало бы на прошлого юзера
         // (container — shared singleton, переживает logout) → кросс-аккаунтная запись.
-        let channel = client.channel("global_messages")
+        // client.channel(topic) идемпотентен по topic: если предыдущий канал остался в реестре
+        // клиента (OS усыпила приложение и оборвала сокет без штатного teardown; либо
+        // reconnectRealtime закрыл лишь сокет, не убрав канал из реестра), повторный channel(...)
+        // вернёт ЕГО уже в статусе .subscribed. Регистрация postgresChange на присоединённом
+        // канале → SDK-варнинг "You cannot call postgresChange after joining the channel" и, что
+        // хуже, НЕпривязанные подписки: realtime молча перестаёт доставлять INSERT/события до
+        // следующей чистой переподписки. Поэтому, если вернулся не-свежий канал, снимаем его
+        // (ограниченный teardown с watchdog) и пересоздаём — postgresChange ниже тогда всегда
+        // регистрируется ДО join. На свежем (.unsubscribed) канале teardown не вызываем — без
+        // лишней задержки.
+        var channel = client.channel("global_messages")
+        if channel.status != .unsubscribed {
+            await teardownChannel(channel)
+            channel = client.channel("global_messages")
+        }
 
         // AsyncStream — регистрируем подписки ДО subscribe (требование SDK)
         let messageInserts = channel.postgresChange(
