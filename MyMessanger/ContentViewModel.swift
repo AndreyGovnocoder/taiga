@@ -10,6 +10,7 @@ import SwiftUI
 import Foundation
 import SwiftData
 import Combine
+import UserNotifications
 
 @Observable
 class ContentViewModel {
@@ -205,6 +206,14 @@ class ContentViewModel {
             withAnimation(.easeInOut(duration: 0.3)) {
                 self.chats = localChats
             }
+
+            // Бейдж иконки = локальный unread (источник истины — БД, НЕ доставка APNs).
+            // reloadLocal — общий чокпоинт всех путей изменения unread (realtime-приход через
+            // .newMessageSaved, ModelContext.didSave, loadChats на пробуждении/sync/старте,
+            // удаление чата), поэтому пересчёт здесь держит бейдж корректным даже когда
+            // сообщение пришло по realtime без поля badge (BUG 1: airplane on→off).
+            let totalUnread = localChats.reduce(0) { $0 + $1.unreadCount }
+            Task { try? await UNUserNotificationCenter.current().setBadgeCount(totalUnread) }
         } catch {
             print("Ошибка чтения локальных чатов: \(error)")
         }
