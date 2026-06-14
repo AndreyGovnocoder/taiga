@@ -12,7 +12,18 @@ import UIKit
 actor LocalCache {
     static let shared = LocalCache()
     
-    private let cacheDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+    // Выделенный подкаталог под image-кэш. КРИТИЧНО: не используем корень Caches напрямую —
+    // там лежит SQLite-стор системного URLCache (Cache.db/-wal/-shm), который держит ОТКРЫТЫЕ
+    // дескрипторы, пока идут загрузки картинок через URLSession.shared. Подметание корня Caches
+    // (clearAll/cleanDiskCache) отвязывало бы Cache.db из-под живого sqlite-хэндла →
+    // "BUG IN CLIENT OF libsqlite3.dylib: ... vnode unlinked while in use". Свой подкаталог
+    // изолирует наши файлы от системного стора: чистим только своё, Cache.db не трогаем.
+    private let cacheDirectory: URL = {
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        let dir = base.appendingPathComponent("ImageCache", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }()
     
     // MARK: - Двухуровневый кэш
     
@@ -159,7 +170,14 @@ actor LocalCache {
     func clearAll() {
         memoryCache.removeAllObjects()
 
+        // HTTP-кэш картинок, загруженных через URLSession.shared, чистим ШТАТНЫМ API URLCache,
+        // а НЕ удалением его файлов: прямое стирание Cache.db ломало sqlite (см. cacheDirectory).
+        // Это покрывает приватность — кэшированные тела ответов прошлого пользователя удаляются.
+        URLCache.shared.removeAllCachedResponses()
+
         let fileManager = FileManager.default
+        // cacheDirectory — наш изолированный подкаталог ImageCache, поэтому подметание его
+        // содержимого больше НЕ задевает системный Cache.db в корне Caches.
         guard let fileURLs = try? fileManager.contentsOfDirectory(
             at: cacheDirectory,
             includingPropertiesForKeys: nil,
