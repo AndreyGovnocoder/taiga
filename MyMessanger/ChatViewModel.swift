@@ -135,9 +135,17 @@ final class ChatViewModel {
         if inserted > 0 {
             totalCount = newTotal
             windowSize += inserted
-            refreshWindow()
         }
-        
+
+        // Наполняем окно СИНХРОННО перед снятием isInitialLoading: TiledView должен
+        // смонтироваться уже с сообщениями (путь cold start, который работает), а не
+        // пустым с последующим .replace-апдейтом — иначе отложенный scroll-to-bottom
+        // на self-sizing-ячейках не долетает до низа и чат открывается вверху.
+        // BUG 3 (после logout→login): локальный кэш чист → сообщения приходят только
+        // серверным fetch в этом шаге, а debounced refreshWindow() гонялся с
+        // монтированием view (isInitialLoading=false). Синхронный apply убирает гонку.
+        _executeRefreshWindow()
+
         isInitialLoading = false
     }
     
