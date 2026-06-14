@@ -713,7 +713,7 @@ final class ChatViewModel {
         // Не вызываем apply, если элементы идентичны. Это предотвращает баг
         // UICollectionView (Invalid Batch Updates) при спаме обновлений.
         if Array(dataSource.items) != items {
-            Log.debug(.ui, "UI DEBUG: 🔄 Обновляем TiledView (было \(dataSource.items.count), стало \(items.count))")
+            Log.debug(.ui, "UI DEBUG: 🔄 Обновляем TiledView (было \(self.dataSource.items.count), стало \(items.count))")
             dataSource.apply(items)
         } else {
             Log.debug(.ui, "UI DEBUG: ⏭ Игнорируем apply(items), элементы идентичны")
@@ -780,7 +780,7 @@ final class ChatViewModel {
     /// - есть флаг pendingIncoming (наш чат получил сообщение)
     /// - countLocalMessages() вернул больше, чем было (данные доступны)
     private func tryIncomingRefresh() {
-        Log.debug(.ui, "UI: 🔄 tryIncomingRefresh вызван. pending: \(pendingEvents)")
+        Log.debug(.ui, "UI: 🔄 tryIncomingRefresh вызван. pending: \(self.pendingEvents)")
         guard !pendingEvents.isEmpty else { return }
         
         realtimeDebounceTask?.cancel()
