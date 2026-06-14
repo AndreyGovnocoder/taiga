@@ -130,7 +130,21 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
         return [.banner, .sound, .badge, .list]
     }
-    
+
+    // Тап по пушу → deep-link в конкретный чат (BUG 2). Вызывается, когда пользователь
+    // тапнул уведомление (из фона ИЛИ при холодном старте — тогда после didFinishLaunching).
+    // chat_id берём из payload (как в willPresent). Кладём в pending-стор (cold launch: вью
+    // могло ещё не подписаться на .openChatRequested) И постим событие (warm: вью уже в дереве).
+    // @MainActor (дефолтная изоляция, как willPresent) → userInfo читаем на MainActor без
+    // переноса non-Sendable dict через границу актора.
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse) async {
+        let info = response.notification.request.content.userInfo
+        guard let chatId = (info["chat_id"] as? String)?.lowercased() else { return }
+        SupabaseManager.shared.pendingDeepLinkChatId = chatId
+        NotificationCenter.default.post(name: .openChatRequested, object: chatId)
+    }
+
     private func saveTokenToSupabase(token: String) async {
         guard let currentUserId = SupabaseManager.shared.currentUserId else {
             print("СЕРВЕР: Юзер не авторизован? не можем сохранить токен")

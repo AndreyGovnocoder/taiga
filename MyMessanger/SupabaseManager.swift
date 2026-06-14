@@ -122,6 +122,17 @@ final class SupabaseManager: @unchecked Sendable {
         set { screenStateLock.withLock { _isChatListVisible = newValue } }
     }
 
+    /// Чат, который надо открыть по тапу на пуш (deep-link, lowercase UUID).
+    /// Ставится из push-делегата (AppDelegate.didReceive), подхватывается ContentView:
+    /// warm — через событие .openChatRequested, cold-launch — в .task (пуш мог быть тапнут
+    /// до подписки вью). nil — нет отложенного deep-link. Под локом, как activeChatId
+    /// (пишется/читается с разных потоков: делегат уведомлений и MainActor-вью).
+    private var _pendingDeepLinkChatId: String?
+    var pendingDeepLinkChatId: String? {
+        get { screenStateLock.withLock { _pendingDeepLinkChatId } }
+        set { screenStateLock.withLock { _pendingDeepLinkChatId = newValue?.lowercased() } }
+    }
+
     private init() {}
 }
 

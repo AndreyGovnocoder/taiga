@@ -135,4 +135,7 @@ extension Notification.Name {
     static let newMessageSaved = Notification.Name("newMessageSaved")
     static let newChatDetected = Notification.Name("newChatDetected")
     static let imageSavedToPhotos = Notification.Name("imageSavedToPhotos")
+    /// Тап по пушу: открыть конкретный чат (object = chat_id, lowercase).
+    /// Постится из AppDelegate.didReceive, обрабатывается ContentView (deep-link).
+    static let openChatRequested = Notification.Name("openChatRequested")
 }

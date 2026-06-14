@@ -23,7 +23,7 @@ struct ContentView: View
 
     @State private var showContactsSheet: Bool = false
     @State private var showCreateGroupSheet: Bool = false
-    @State private var navigateToChat: Chat? = nil
+    @State private var chatPath: [Chat] = []
     @State private var chatToDelete: Chat? = nil
     
     @State private var showSyncStatus: Bool = true
@@ -33,7 +33,7 @@ struct ContentView: View
     @Namespace private var animation
     
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $chatPath) {
             VStack(spacing: 0) {
                 // Главный переключатель табов
                 HStack(spacing: 0) {
@@ -81,9 +81,6 @@ struct ContentView: View
             }
             
             .navigationTitle("Чаты")
-            .navigationDestination(item: $navigateToChat) { chat in
-                ChatDetailView(chat: chat)
-            }
             .navigationDestination(for: Chat.self) { chat in
                 ChatDetailView(chat: chat)
             }
@@ -145,7 +142,7 @@ struct ContentView: View
                     showContactsSheet = false
                     // Небольшая задержка, чтобы NavigationStack успел закрыть sheet
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        self.navigateToChat = createdChat
+                        self.chatPath = [createdChat]
                     }
                 }
                 // Sheet перекрывает список → он не «виден» (счётчики скрыты), не подавляем баннер.
@@ -156,7 +153,7 @@ struct ContentView: View
                 CreateGroupView { createdChat in
                     showCreateGroupSheet = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        self.navigateToChat = createdChat
+                        self.chatPath = [createdChat]
                     }
                 }
                 .onAppear { SupabaseManager.shared.isChatListVisible = false }
@@ -188,6 +185,12 @@ struct ContentView: View
             .task {
                 await viewModel.loadChats(context: context, showLoadingIndicator: true)
                 viewModel.ensureGlobalSubscription(context: context)
+                // Cold-launch deep-link (BUG 2): пуш мог быть тапнут ДО монтирования
+                // ContentView (когда .onReceive ещё не подписан) → подхватываем отложенный
+                // chat_id здесь, после первичной загрузки чатов.
+                if let pending = SupabaseManager.shared.pendingDeepLinkChatId {
+                    handleDeepLink(chatId: pending)
+                }
             }
         }
         .onChange(of: router.appWakeUpTrigger) { _, _ in
@@ -204,6 +207,15 @@ struct ContentView: View
             // НЕ меняет router.state (остаётся .main) → подписка не рвётся.
             if newState != .main {
                 viewModel.stopGlobalSubscription()
+                // Сбрасываем отложенный deep-link при выходе/смене аккаунта, чтобы chat_id
+                // прошлого пользователя не подхватился после нового входа.
+                SupabaseManager.shared.pendingDeepLinkChatId = nil
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openChatRequested)) { notification in
+            // Тёплый путь deep-link (BUG 2): приложение уже запущено, ContentView в дереве.
+            if let chatId = notification.object as? String {
+                handleDeepLink(chatId: chatId)
             }
         }
         // Список чатов на экране → подавляем foreground-баннер (новое сообщение видно
@@ -230,6 +242,35 @@ struct ContentView: View
         }
     }
     
+    /// Deep-link из пуша (BUG 2): открыть чат по chat_id. Резолвим из загруженных чатов
+    /// (если ещё не подгружены — один loadChats и повтор), затем заменяем chatPath на [chat] —
+    /// тот же стек навигации, что и при открытии созданного чата. Идемпотентно: сразу чистим
+    /// pending и не переоткрываем уже активный чат.
+    private func handleDeepLink(chatId: String) {
+        let target = chatId.lowercased()
+        SupabaseManager.shared.pendingDeepLinkChatId = nil
+
+        // Уже открыт этот чат — ничего не делаем.
+        if SupabaseManager.shared.activeChatId == target { return }
+
+        Task { @MainActor in
+            var chat = viewModel.chats.first { $0.id.lowercased() == target }
+            if chat == nil {
+                // Чат мог ещё не подгрузиться (cold launch / новый чат) — обновляем и повторяем.
+                await viewModel.loadChats(context: context, showLoadingIndicator: false)
+                chat = viewModel.chats.first { $0.id.lowercased() == target }
+            }
+            guard let chat else {
+                print("DEEP-LINK: чат \(target) не найден локально — не открываем")
+                return
+            }
+            // Атомарная замена стека навигации ровно на [chat] (поверх корня-списка),
+            // что бы ни было открыто. Корректно для всех путей, включая «открыт ДРУГОЙ чат»
+            // (тапнули пуш для B, читая A → попадаем на B, back ведёт в список, не в A).
+            chatPath = [chat]
+        }
+    }
+
     @ViewBuilder
     private func chatList(for list: [Chat]) -> some View {
         ScrollView {
