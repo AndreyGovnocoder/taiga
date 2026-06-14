@@ -190,7 +190,7 @@ struct CachedImageView: View {
                     await LocalCache.shared.saveImage(image, forKey: memKey)
                 }
             } catch {
-                print("CachedImageView: Ошибка загрузки \(url): \(error.localizedDescription)")
+                Log.error(.media, "CachedImageView: Ошибка загрузки \(url): \(error.localizedDescription)")
             }
         }
     }

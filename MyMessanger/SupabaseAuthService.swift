@@ -50,9 +50,9 @@ class SupabaseAuthService: AuthServiceProtocol {
                     isOnline: userDTO.is_online
                 )
             }
-            print("СЕРВЕР: Профиль пользователя [\(userDTO.nickname ?? "")] успешно загружен")
+            Log.debug(.auth, "Профиль пользователя успешно загружен")
         } catch {
-            print("СЕРВЕР: Ошибка загрузки данных профиля: \(error.localizedDescription)")
+            Log.error(.auth, "СЕРВЕР: Ошибка загрузки данных профиля: \(error.localizedDescription)")
         }
     }
     

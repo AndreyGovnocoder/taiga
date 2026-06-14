@@ -395,7 +395,7 @@ struct AuthView: View {
                     router.state = .main
                 }
             } catch {
-                print("Error: \(error.localizedDescription)")
+                Log.error(.auth, "Error: \(error.localizedDescription)")
                 let errorText = error.localizedDescription.contains("already registered") ? "Пользователь уже зарегистрирован" : error.localizedDescription
                 await MainActor.run {
                     errorMessage = isLoginMode ? "Ошибка, Неверный логин или пароль" : "Ошибка регистрации: \(errorText)"
@@ -423,7 +423,7 @@ struct AuthView: View {
                     }
                 }
             } catch {
-                print("СЕРВЕР: Ошибка проверки телефона: \(error.localizedDescription)")
+                Log.error(.auth, "СЕРВЕР: Ошибка проверки телефона: \(error.localizedDescription)")
             }
         }
     }
@@ -444,7 +444,7 @@ struct AuthView: View {
                     }
                 }
             } catch {
-                print("СЕРВЕР: Ошибка проверки никнейма: \(error)")
+                Log.error(.auth, "СЕРВЕР: Ошибка проверки никнейма: \(error)")
             }
         }
     }

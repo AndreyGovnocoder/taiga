@@ -184,7 +184,7 @@ struct ZoomableImageView: View {
                 self.uiImage = img
             }
         } catch {
-            print("Ошибка загрузки оригинала фото: \(error)")
+            Log.error(.media, "Ошибка загрузки оригинала фото: \(error)")
         }
     }
 }

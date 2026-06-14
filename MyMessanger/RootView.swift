@@ -45,7 +45,7 @@ struct RootView: View {
         }
         .onChange(of: scenePhase) { oldPhase, newPhase in
             if newPhase == .active {
-                print("СЕРВЕР: Корень поймал пробуждение! Даем сигнал всем экранам!")
+                Log.debug(.app, "СЕРВЕР: Корень поймал пробуждение! Даем сигнал всем экранам!")
                 router.appWakeUpTrigger += 1
             }
         }

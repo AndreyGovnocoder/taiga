@@ -121,7 +121,7 @@ actor LocalCache {
                 try FileManager.default.removeItem(at: url)
             }
         } catch {
-            print("СЕРВЕР: Ошибка удаления файла из кэша: \(error.localizedDescription)")
+            Log.error(.media, "СЕРВЕР: Ошибка удаления файла из кэша: \(error.localizedDescription)")
         }
     }
     
@@ -157,10 +157,10 @@ actor LocalCache {
             
             if deletedCount > 0 {
                 let deletedMB = Double(deletedBytes) / 1024.0 / 1024.0
-                print("СЕРВЕР: Кэш очищен. Удалено \(deletedCount) файлов (\(String(format: "%.1f", deletedMB)) МБ)")
+                Log.debug(.media, "СЕРВЕР: Кэш очищен. Удалено \(deletedCount) файлов (\(String(format: "%.1f", deletedMB)) МБ)")
             }
         } catch {
-            print("Ошибка при очистке кэша: \(error.localizedDescription)")
+            Log.error(.media, "Ошибка при очистке кэша: \(error.localizedDescription)")
         }
     }
     
@@ -188,7 +188,7 @@ actor LocalCache {
         for url in fileURLs {
             if (try? fileManager.removeItem(at: url)) != nil { removed += 1 }
         }
-        print("СЕРВЕР: Локальный кэш очищен при выходе/удалении (\(removed) файлов)")
+        Log.info(.media, "СЕРВЕР: Локальный кэш очищен при выходе/удалении (\(removed) файлов)")
     }
 
     /// Общий размер disk-кэша в байтах

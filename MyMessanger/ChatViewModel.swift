@@ -117,12 +117,12 @@ final class ChatViewModel {
                 break
             } catch {
                 if error.isTransientNetwork && attempt < 3 && !Task.isCancelled {
-                    print("CHAT: Повтор загрузки сообщений после сетевого сбоя (попытка \(attempt))")
+                    Log.debug(.chat, "CHAT: Повтор загрузки сообщений после сетевого сбоя (попытка \(attempt))")
                     attempt += 1
                     try? await Task.sleep(nanoseconds: 500_000_000)
                     continue
                 }
-                print("CHAT: Не удалось загрузить сообщения: \(error.localizedDescription)")
+                Log.error(.chat, "CHAT: Не удалось загрузить сообщения: \(error.localizedDescription)")
                 break
             }
         }
@@ -176,7 +176,7 @@ final class ChatViewModel {
         refreshWindow()
         await markAsRead()
         
-        print("CHAT: refreshAfterWakeUp — fetched \(fetched ?? 0), inserted \(inserted), total \(newTotal)")
+        Log.debug(.chat, "CHAT: refreshAfterWakeUp — fetched \(fetched ?? 0), inserted \(inserted), total \(newTotal)")
     }
     
     // MARK: - Pagination
@@ -253,7 +253,7 @@ final class ChatViewModel {
         } catch {
             // Локальная вставка не должна молча терять текст: возвращаем ввод и reply,
             // чтобы пользователь увидел сообщение в поле и мог отправить повторно.
-            print("SEND: Не удалось создать сообщение локально: \(error.localizedDescription)")
+            Log.error(.chat, "SEND: Не удалось создать сообщение локально: \(error.localizedDescription)")
             inputText = text
             replyToMessage = savedReply
             return
@@ -275,7 +275,7 @@ final class ChatViewModel {
                 
                 try await chatService.deliverMessage(messageId: messageId, context: context)
             } catch {
-                print("SEND: Ошибка доставки: \(error.localizedDescription)")
+                Log.error(.chat, "SEND: Ошибка доставки: \(error.localizedDescription)")
             }
             // Обновляем иконку статуса (.sending → .sent/.failed)
             refreshWindow()
@@ -294,7 +294,7 @@ final class ChatViewModel {
             do {
                 _ = try await waitOrStartMaterialization(context: context)
             } catch {
-                print("SEND MEDIA: Ошибка создания чата: \(error.localizedDescription)")
+                Log.error(.chat, "SEND MEDIA: Ошибка создания чата: \(error.localizedDescription)")
                 return
             }
         }
@@ -328,17 +328,17 @@ final class ChatViewModel {
         if !chat.isDraft { return chat.id }
         
         if let task = materializeTask {
-            print("ChatVM: Ожидание текущей материализации...")
+            Log.debug(.chat, "ChatVM: Ожидание текущей материализации...")
             return try await task.value
         } else {
-            print("ChatVM: Запуск материализации draft-чата...")
+            Log.debug(.chat, "ChatVM: Запуск материализации draft-чата...")
             let task = Task<String, Error> {
                 try await materializeDraft(context: context)
             }
             materializeTask = task
             let realChatId = try await task.value
             materializeTask = nil
-            print("ChatVM: Draft материализован → chatId: \(realChatId)")
+            Log.debug(.chat, "ChatVM: Draft материализован → chatId: \(realChatId)")
             return realChatId
         }
     }
@@ -365,7 +365,7 @@ final class ChatViewModel {
             try? context.save()
         }
         
-        print("DRAFT: Чат материализован: \(draftId) → \(realChat.id)")
+        Log.debug(.chat, "DRAFT: Чат материализован: \(draftId) → \(realChat.id)")
         return realChat.id
     }
     
@@ -400,7 +400,7 @@ final class ChatViewModel {
         do {
             try await chatService.retryMessage(message, context: context)
         } catch {
-            print("RETRY IMAGE: Ошибка повторной отправки: \(error.localizedDescription)")
+            Log.error(.chat, "RETRY IMAGE: Ошибка повторной отправки: \(error.localizedDescription)")
         }
         refreshWindow()
     }
@@ -428,7 +428,7 @@ final class ChatViewModel {
                 refreshWindow()
             }
         } catch {
-            print("ОШИБКА: Не удалось удалить сообщение: \(error.localizedDescription)")
+            Log.error(.chat, "ОШИБКА: Не удалось удалить сообщение: \(error.localizedDescription)")
             if let state {
                 await MainActor.run {
                     _ = state.deletingIds.remove(message.id)
@@ -498,7 +498,7 @@ final class ChatViewModel {
             }
             return true
         } catch {
-            print("ОШИБКА: Не удалось удалить сообщения: \(error.localizedDescription)")
+            Log.error(.chat, "ОШИБКА: Не удалось удалить сообщения: \(error.localizedDescription)")
             if let state {
                 await MainActor.run {
                     state.deletingIds.subtract(messages.map(\.id))
@@ -529,7 +529,7 @@ final class ChatViewModel {
             try await chatService.editMessage(message, newText: newText, context: context)
             refreshWindow()
         } catch {
-            print("ОШИБКА: Не удалось отредактировать сообщение: \(error.localizedDescription)")
+            Log.error(.chat, "ОШИБКА: Не удалось отредактировать сообщение: \(error.localizedDescription)")
         }
     }
     
@@ -713,10 +713,10 @@ final class ChatViewModel {
         // Не вызываем apply, если элементы идентичны. Это предотвращает баг
         // UICollectionView (Invalid Batch Updates) при спаме обновлений.
         if Array(dataSource.items) != items {
-            print("UI DEBUG: 🔄 Обновляем TiledView (было \(dataSource.items.count), стало \(items.count))")
+            Log.debug(.ui, "UI DEBUG: 🔄 Обновляем TiledView (было \(dataSource.items.count), стало \(items.count))")
             dataSource.apply(items)
         } else {
-            print("UI DEBUG: ⏭ Игнорируем apply(items), элементы идентичны")
+            Log.debug(.ui, "UI DEBUG: ⏭ Игнорируем apply(items), элементы идентичны")
         }
     }
     
@@ -762,7 +762,7 @@ final class ChatViewModel {
                     return
                 }
                 let eventType = notification.userInfo?["eventType"] as? String ?? "inserted"
-                print("UI: Получено уведомление о сообщении \(incomingChatId) типа \(eventType)")
+                Log.debug(.ui, "UI: Получено уведомление о сообщении \(incomingChatId) типа \(eventType)")
                 self.pendingEvents.insert(eventType)
                 self.tryIncomingRefresh()
             }
@@ -780,7 +780,7 @@ final class ChatViewModel {
     /// - есть флаг pendingIncoming (наш чат получил сообщение)
     /// - countLocalMessages() вернул больше, чем было (данные доступны)
     private func tryIncomingRefresh() {
-        print("UI: 🔄 tryIncomingRefresh вызван. pending: \(pendingEvents)")
+        Log.debug(.ui, "UI: 🔄 tryIncomingRefresh вызван. pending: \(pendingEvents)")
         guard !pendingEvents.isEmpty else { return }
         
         realtimeDebounceTask?.cancel()
@@ -790,11 +790,11 @@ final class ChatViewModel {
             
             let newTotal = self.countLocalMessages()
             let difference = newTotal - self.totalCount
-            print("UI: 📊 tryIncomingRefresh -> newTotal: \(newTotal) (было \(self.totalCount)), diff: \(difference)")
+            Log.debug(.ui, "UI: 📊 tryIncomingRefresh -> newTotal: \(newTotal) (было \(self.totalCount)), diff: \(difference)")
             var didHandle = false
             
             if difference > 0 {
-                print("UI: ➕ Обрабатываем вставку (difference > 0)")
+                Log.debug(.ui, "UI: ➕ Обрабатываем вставку (difference > 0)")
                 // Новые сообщения вставлены
                 self.windowSize += difference
                 self.totalCount = newTotal
@@ -809,7 +809,7 @@ final class ChatViewModel {
             }
             
             if self.pendingEvents.contains("edited") || self.pendingEvents.contains("deleted") || difference < 0 {
-                print("UI: ✏️🗑 Обрабатываем изменение (edit/delete/diff < 0)")
+                Log.debug(.ui, "UI: ✏️🗑 Обрабатываем изменение (edit/delete/diff < 0)")
                 if difference < 0 {
                     self.windowSize += difference
                     if self.windowSize < self.pageSize { self.windowSize = self.pageSize }
@@ -821,7 +821,7 @@ final class ChatViewModel {
             }
             
             if didHandle {
-                print("UI: 🚀 Вызываем refreshWindow()")
+                Log.debug(.ui, "UI: 🚀 Вызываем refreshWindow()")
                 self.refreshWindow()
             }
         }

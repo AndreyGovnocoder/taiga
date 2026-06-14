@@ -72,7 +72,7 @@ class ContentViewModel {
                     break
                 } catch {
                     if error.isTransientNetwork && attempt < 3 && !Task.isCancelled {
-                        print("СЕРВЕР: Повтор загрузки чатов после сетевого сбоя (попытка \(attempt))")
+                        Log.debug(.server, "СЕРВЕР: Повтор загрузки чатов после сетевого сбоя (попытка \(attempt))")
                         attempt += 1
                         try? await Task.sleep(nanoseconds: 500_000_000)
                         continue
@@ -104,12 +104,12 @@ class ContentViewModel {
             }
         } catch {
             if Task.isCancelled || (error as NSError).code == URLError.cancelled.rawValue {
-                print("СЕРВЕР: Загрузка чатов отменена (прерванный свайп). Игнорируем ошибку")
+                Log.debug(.server, "СЕРВЕР: Загрузка чатов отменена (прерванный свайп). Игнорируем ошибку")
                 withAnimation { self.isLoading = false }
                 return
             }
 
-            print("Ошибка загрузки чатов: \(error)")
+            Log.error(.server, "Ошибка загрузки чатов: \(error)")
             self.errorMessage = "Не удалось загрузить чаты"
             self.isLoading = false
         }
@@ -141,9 +141,9 @@ class ContentViewModel {
             do {
                 try await self.chatService.subscribeToAllChats(container: context.container)
             } catch is CancellationError {
-                print("СЕРВЕР: Глобальная подписка остановлена")
+                Log.debug(.realtime, "СЕРВЕР: Глобальная подписка остановлена")
             } catch {
-                print("СЕРВЕР: Ошибка глобальной подписки: \(error)")
+                Log.error(.realtime, "СЕРВЕР: Ошибка глобальной подписки: \(error)")
             }
         }
     }
@@ -215,7 +215,7 @@ class ContentViewModel {
             let totalUnread = localChats.reduce(0) { $0 + $1.unreadCount }
             Task { try? await UNUserNotificationCenter.current().setBadgeCount(totalUnread) }
         } catch {
-            print("Ошибка чтения локальных чатов: \(error)")
+            Log.error(.db, "Ошибка чтения локальных чатов: \(error)")
         }
     }
 
@@ -227,7 +227,7 @@ class ContentViewModel {
             try await chatService.deleteChat(chatId: chat.id, context: context)
             reloadLocal(context: context)
         } catch {
-            print("Ошибка удаления чата: \(error)")
+            Log.error(.chat, "Ошибка удаления чата: \(error)")
         }
     }
 }

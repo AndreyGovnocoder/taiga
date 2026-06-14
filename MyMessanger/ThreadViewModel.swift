@@ -198,7 +198,7 @@ final class ThreadViewModel {
                 
                 try await chatService.deliverMessage(messageId: messageId, context: context)
             } catch {
-                print("THREAD: Ошибка доставки: \(error.localizedDescription)")
+                Log.error(.chat, "THREAD: Ошибка доставки: \(error.localizedDescription)")
             }
             refreshWindow()
         }
@@ -240,7 +240,7 @@ final class ThreadViewModel {
         do {
             try await chatService.retryMessage(message, context: context)
         } catch {
-            print("THREAD RETRY: Ошибка повторной отправки: \(error.localizedDescription)")
+            Log.error(.chat, "THREAD RETRY: Ошибка повторной отправки: \(error.localizedDescription)")
         }
         refreshWindow()
     }

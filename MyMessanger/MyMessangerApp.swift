@@ -18,7 +18,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions:[UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
-        print("AppDelegate: Мессенджер успешно запущен и готов к настройке сервисов!")
+        Log.debug(.app, "AppDelegate: Мессенджер успешно запущен и готов к настройке сервисов!")
         
         // Запуск мониторинга сети для авторетрая недоставленных сообщений
         _ = NetworkMonitor.shared
@@ -46,7 +46,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let tokenParts = deviceToken.map { data in String(format: "%02.2hhx", data) }
         let tokenString = tokenParts.joined()
-        print("СЕРВЕР: APNs Token: \(tokenString)")
+        Log.debug(.push, "APNs device token получен (\(tokenString.count) hex-символов)")
         
         // Отправляем токен в Supabase
         Task {
@@ -81,7 +81,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             let inserted = try await SupabaseChatService().fetchAndStoreMessage(messageId: messageId, container: container)
             return inserted ? .newData : .noData
         } catch {
-            print("СЕРВЕР: Не удалось дотянуть сообщение по пушу: \(error.localizedDescription)")
+            Log.error(.push, "СЕРВЕР: Не удалось дотянуть сообщение по пушу: \(error.localizedDescription)")
             return .failed
         }
     }
@@ -90,23 +90,23 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         let center = UNUserNotificationCenter.current()
         center.requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
             if let error = error {
-                print("СЕРВЕР: Ошибка при запросе разрешений на пуши: \(error.localizedDescription)")
+                Log.error(.push, "СЕРВЕР: Ошибка при запросе разрешений на пуши: \(error.localizedDescription)")
                 return
             }
             
             if granted {
-                print("СЕРВЕР: Пользователь разрашил пуш-уведомления")
+                Log.debug(.push, "СЕРВЕР: Пользователь разрашил пуш-уведомления")
                 DispatchQueue.main.async {
                     application.registerForRemoteNotifications()
                 }
             } else {
-                print("СЕРВЕР: Пользователь запретил пуш-уведомления")
+                Log.debug(.push, "СЕРВЕР: Пользователь запретил пуш-уведомления")
             }
         }
     }
     
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        print("СЕРВЕР: Не удалось получить Device Token: \(error.localizedDescription)")
+        Log.error(.push, "СЕРВЕР: Не удалось получить Device Token: \(error.localizedDescription)")
     }
     
     // Foreground-показ пуша. Вызывается ТОЛЬКО когда приложение активно — поэтому флаги
@@ -147,7 +147,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     private func saveTokenToSupabase(token: String) async {
         guard let currentUserId = SupabaseManager.shared.currentUserId else {
-            print("СЕРВЕР: Юзер не авторизован? не можем сохранить токен")
+            Log.debug(.push, "СЕРВЕР: Юзер не авторизован? не можем сохранить токен")
             return
         }
         
@@ -158,9 +158,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 .eq("id", value: currentUserId)
                 .execute()
             
-            print("СЕРВЕР: Токен успешно сохранен в Supabase")
+            Log.debug(.push, "СЕРВЕР: Токен успешно сохранен в Supabase")
         } catch {
-            print("СЕРВЕР: Ошибка при сохранении токена в Supabase: \(error.localizedDescription)")
+            Log.error(.push, "СЕРВЕР: Ошибка при сохранении токена в Supabase: \(error.localizedDescription)")
         }
     }
 }
@@ -195,7 +195,7 @@ struct MyMessangerApp: App {
             // попадает (Swift do/catch его не ловит). Чтобы НЕ терять локальный кэш молча — не
             // удаляем store, а ПЕРЕИМЕНОВЫВАЕМ в .backup (восстановимо/диагностируемо) и логируем
             // причину; данные всё равно кэш сервера и доедут при следующей синхронизации.
-            print("SwiftData: ⚠️ Не удалось открыть хранилище (\(error)). Сохраняю повреждённый store в .backup и пересоздаю БД.")
+            Log.error(.db, "SwiftData: ⚠️ Не удалось открыть хранилище (\(error)). Сохраняю повреждённый store в .backup и пересоздаю БД.")
             let storeURL = modelConfiguration.url
             let shmURL = storeURL.deletingPathExtension().appendingPathExtension("sqlite-shm")
             let walURL = storeURL.deletingPathExtension().appendingPathExtension("sqlite-wal")

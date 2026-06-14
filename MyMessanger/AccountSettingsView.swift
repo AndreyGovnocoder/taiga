@@ -196,7 +196,7 @@ struct AccountSettingsView: View {
             try context.delete(model: UserDB.self)
             try context.save()
         } catch {
-            print("СЕРВЕР: Не удалось очистить локальную БД: \(error.localizedDescription)")
+            Log.error(.db, "СЕРВЕР: Не удалось очистить локальную БД: \(error.localizedDescription)")
         }
     }
 }

@@ -21,7 +21,7 @@ class SupabaseChatService: ChatServiceProtocol {
         client.realtimeV2.disconnect()
         try? await Task.sleep(for: .milliseconds(300))
         await client.realtimeV2.connect()
-        print("СЕРВЕР: Realtime переподключен")
+        Log.debug(.realtime, "СЕРВЕР: Realtime переподключен")
     }
 
     /// Снимает realtime-канал, НЕ зависая на мёртвом сокете.
@@ -58,7 +58,7 @@ class SupabaseChatService: ChatServiceProtocol {
         let session = try await client.auth.session
         let myUserId = session.user.id
         
-        print("СЕРВЕР: Мой реальный ID: \(myUserId.uuidString.lowercased())")
+        Log.debug(.server, "Профиль текущего пользователя определён")
 
         let myParticipants: [ChatParticipantDTO] = try await client
             .from("chat_participants")
@@ -67,12 +67,12 @@ class SupabaseChatService: ChatServiceProtocol {
             .execute()
             .value
 
-        print("СЕРВЕР: Найдено чатов для меня: \(myParticipants.count)")
+        Log.debug(.server, "СЕРВЕР: Найдено чатов для меня: \(myParticipants.count)")
         
         let chatIds = myParticipants.map { $0.chat_id }
         
         if chatIds.isEmpty {
-            print("СЕРВЕР: Нет чатов для меня")
+            Log.debug(.server, "СЕРВЕР: Нет чатов для меня")
             return []
         }
         
@@ -394,7 +394,7 @@ class SupabaseChatService: ChatServiceProtocol {
         } catch {
             let errorString = String(describing: error)
             if errorString.contains("messages_reply_to_message_id_fkey") {
-                print("СЕРВЕР: Родительского сообщения больше нет на сервере. Отправляем как обычное.")
+                Log.debug(.chat, "СЕРВЕР: Родительского сообщения больше нет на сервере. Отправляем как обычное.")
                 
                 let fallbackDTO = MessageInsertDTO(
                     id: localMsgId,
@@ -506,13 +506,13 @@ class SupabaseChatService: ChatServiceProtocol {
         
         // Draft-чат — пропускаем доставку, материализация произойдёт в ChatViewModel
         if chatId.hasPrefix("draft_") {
-            print("DELIVER: Пропуск draft-сообщения \(messageId) (chatId: \(chatId))")
+            Log.debug(.chat, "DELIVER: Пропуск draft-сообщения \(messageId) (chatId: \(chatId))")
             return
         }
         
         guard let msgUUID = UUID(uuidString: messageId),
               let chatUUID = UUID(uuidString: chatId) else {
-            print("DELIVER: Invalid UUID — messageId: \(messageId), chatId: \(chatId)")
+            Log.error(.chat, "DELIVER: Invalid UUID — messageId: \(messageId), chatId: \(chatId)")
             throw NSError(domain: "ChatService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid UUID in deliverMessage"])
         }
         
@@ -554,12 +554,12 @@ class SupabaseChatService: ChatServiceProtocol {
             }
             
             try? context.save()
-            print("DELIVER: Сообщение \(messageId) успешно доставлено")
+            Log.debug(.chat, "DELIVER: Сообщение \(messageId) успешно доставлено")
             
         } catch {
             let errorString = String(describing: error)
             if errorString.contains("messages_reply_to_message_id_fkey") {
-                print("DELIVER: Родительского сообщения нет. Отправляем без реплая.")
+                Log.debug(.chat, "DELIVER: Родительского сообщения нет. Отправляем без реплая.")
                 
                 let fallbackDTO = MessageInsertDTO(
                     id: msgUUID,
@@ -586,13 +586,13 @@ class SupabaseChatService: ChatServiceProtocol {
                     return
                 } catch {
                     // Не меняем статус на .failed — оставляем .sending для авторетрая
-                    print("DELIVER: Ошибка fallback-отправки: \(error.localizedDescription)")
+                    Log.error(.chat, "DELIVER: Ошибка fallback-отправки: \(error.localizedDescription)")
                     throw error
                 }
             }
             
             // Не меняем статус на .failed — оставляем .sending для авторетрая
-            print("DELIVER: Ошибка доставки (status остаётся .sending): \(error.localizedDescription)")
+            Log.error(.chat, "DELIVER: Ошибка доставки (status остаётся .sending): \(error.localizedDescription)")
             throw error
         }
     }
@@ -609,13 +609,13 @@ class SupabaseChatService: ChatServiceProtocol {
             return
         }
         
-        print("RETRY: Найдено \(pendingMessages.count) недоставленных сообщений")
+        Log.debug(.chat, "RETRY: Найдено \(pendingMessages.count) недоставленных сообщений")
         
         for msgDB in pendingMessages {
             do {
                 try await deliverMessage(messageId: msgDB.id, context: context)
             } catch {
-                print("RETRY: Не удалось доставить \(msgDB.id): \(error.localizedDescription)")
+                Log.error(.chat, "RETRY: Не удалось доставить \(msgDB.id): \(error.localizedDescription)")
                 // Продолжаем с остальными
             }
         }
@@ -630,7 +630,7 @@ class SupabaseChatService: ChatServiceProtocol {
         
         // Draft-чат — пропускаем retry, материализация произойдёт в ChatViewModel
         if localMsgDB.chatId.hasPrefix("draft_") {
-            print("RETRY: Пропуск draft-сообщения \(msgId)")
+            Log.debug(.chat, "RETRY: Пропуск draft-сообщения \(msgId)")
             return
         }
         
@@ -671,7 +671,7 @@ class SupabaseChatService: ChatServiceProtocol {
             } catch {
                 let errorString = String(describing: error)
                 if errorString.contains("messages_reply_to_message_id_fkey") {
-                    print("СЕРВЕР/RETRY: Родительского сообщения нет. Отправляем без реплая.")
+                    Log.debug(.chat, "СЕРВЕР/RETRY: Родительского сообщения нет. Отправляем без реплая.")
                     var fallback = sendDTO
                     fallback.created_at = message.createdAt
                     let fallbackDTO = MessageInsertDTO(
@@ -707,7 +707,7 @@ class SupabaseChatService: ChatServiceProtocol {
                 
                 // Если URL уже remote (файлы успешно загружены ранее) — пропускаем upload
                 if imageURL.scheme == "https" {
-                    print("СЕРВЕР/RETRY: Файлы уже в Storage, пропускаем upload. Только upsert в messages.")
+                    Log.debug(.chat, "СЕРВЕР/RETRY: Файлы уже в Storage, пропускаем upload. Только upsert в messages.")
                     remoteOriginalURL = imageURL
                     remoteThumbURL = thumbURL
                     progressManager.setProgress(0.7, for: msgId)
@@ -717,7 +717,7 @@ class SupabaseChatService: ChatServiceProtocol {
                     let thumbKey = thumbURL?.lastPathComponent ?? ""
                     
                     guard let originalData = await LocalCache.shared.load(forKey: originalKey) else {
-                        print("СЕРВЕР/RETRY: Оригинал не найден в кэше — помечаем как .failed")
+                        Log.error(.chat, "СЕРВЕР/RETRY: Оригинал не найден в кэше — помечаем как .failed")
                         progressManager.removeProgress(for: msgId)
                         localMsgDB.status = .failed
                         try? context.save()
@@ -747,7 +747,7 @@ class SupabaseChatService: ChatServiceProtocol {
                 guard let msgUUID = UUID(uuidString: message.id),
                       let chatUUID = UUID(uuidString: message.chatId),
                       let senderUUID = UUID(uuidString: message.senderId) else {
-                    print("СЕРВЕР: Некорректный UUID при отправке медиа — помечаем .failed")
+                    Log.error(.chat, "СЕРВЕР: Некорректный UUID при отправке медиа — помечаем .failed")
                     progressManager.removeProgress(for: msgId)
                     localMsgDB.status = .failed
                     try? context.save()
@@ -956,7 +956,7 @@ class SupabaseChatService: ChatServiceProtocol {
             await teardownChannel(channel)
             throw error
         }
-        print("СЕРВЕР DEBUG: Подписались на канал global_messages!")
+        Log.debug(.realtime, "СЕРВЕР DEBUG: Подписались на канал global_messages!")
         
         // Параллельно слушаем оба стрима — for await выполняется на MainActor,
         // decode происходит внутри SDK до передачи в стрим — нет nonisolated проблемы
@@ -965,7 +965,7 @@ class SupabaseChatService: ChatServiceProtocol {
             // MARK: - Новые сообщения (INSERT в messages)
             group.addTask { @MainActor in
                 for await insert in messageInserts {
-                    print("СЕРВЕР DEBUG: 🌐 ПОЛУЧЕН СИГНАЛ В messages!")
+                    Log.debug(.realtime, "СЕРВЕР DEBUG: 🌐 ПОЛУЧЕН СИГНАЛ В messages!")
                     do {
                         let dto = try insert.record.decode(as: RealtimeMessageDTO.self)
                         
@@ -988,11 +988,11 @@ class SupabaseChatService: ChatServiceProtocol {
                         try? dbWorker.saveIncomingMessage(dto: dto, currentUserId: currentUserId)
                         
                         if !isKnown {
-                            print("СЕРВЕР: Новый чат обнаружен: \(chatId). Перезагружаем список.")
+                            Log.debug(.realtime, "СЕРВЕР: Новый чат обнаружен: \(chatId). Перезагружаем список.")
                             NotificationCenter.default.post(name: Notification.Name("newChatDetected"), object: nil)
                         }
                     } catch {
-                        print("СЕРВЕР DEBUG: Ошибка парсинга сообщения: \(error)")
+                        Log.error(.realtime, "СЕРВЕР DEBUG: Ошибка парсинга сообщения: \(error)")
                     }
                 }
             }
@@ -1000,7 +1000,7 @@ class SupabaseChatService: ChatServiceProtocol {
             // MARK: - События сообщений (INSERT/UPDATE в message_events — удаление/редактирование)
             group.addTask { @MainActor in
                 for await action in messageEventChanges {
-                    print("СЕРВЕР DEBUG: 🌐 ПОЛУЧЕН СИГНАЛ В message_events!")
+                    Log.debug(.realtime, "СЕРВЕР DEBUG: 🌐 ПОЛУЧЕН СИГНАЛ В message_events!")
                     do {
                         let dto: MessageEventDTO
                         switch action {
@@ -1029,7 +1029,7 @@ class SupabaseChatService: ChatServiceProtocol {
                             try? dbWorker.applyMessageEvent(dto: dto)
                         }
                     } catch {
-                        print("СЕРВЕР DEBUG: Ошибка парсинга события: \(error)")
+                        Log.error(.realtime, "СЕРВЕР DEBUG: Ошибка парсинга события: \(error)")
                     }
                 }
             }
@@ -1040,7 +1040,7 @@ class SupabaseChatService: ChatServiceProtocol {
         // отмене задачи → withTaskGroup возвращается. Ограниченный teardown гарантирует, что
         // канал убран из реестра клиента ДО следующей переподписки (см. teardownChannel).
         await teardownChannel(channel)
-        print("СЕРВЕР DEBUG: Отписались от глобального канала")
+        Log.debug(.realtime, "СЕРВЕР DEBUG: Отписались от глобального канала")
     }
     
     func markChatAsRead(chatId: String, context: ModelContext) async throws {
@@ -1077,7 +1077,7 @@ class SupabaseChatService: ChatServiceProtocol {
             .from(bucketName)
             .getPublicURL(path: fileName)
         
-        print("СЕРВЕР: Фото успешно загружено! URL: \(publicURL.absoluteString)")
+        Log.debug(.media, "СЕРВЕР: Фото успешно загружено! URL: \(publicURL.absoluteString)")
         return publicURL
     }
     
@@ -1108,9 +1108,9 @@ class SupabaseChatService: ChatServiceProtocol {
             
             do {
                 _ = try await client.storage.from("chat_media").remove(paths: [fileName])
-                print("СЕРВЕР: Фотография и миниатюра удалены из Supabase Storage")
+                Log.debug(.media, "СЕРВЕР: Фотография и миниатюра удалены из Supabase Storage")
             } catch {
-                print("СЕРВЕР: Ошибка удаления фото из Supabase Storage: \(error.localizedDescription)")
+                Log.error(.media, "СЕРВЕР: Ошибка удаления фото из Supabase Storage: \(error.localizedDescription)")
             }
             
             await LocalCache.shared.delete(forKey: fileName)
@@ -1181,9 +1181,9 @@ class SupabaseChatService: ChatServiceProtocol {
                         
                 }
                 
-                print("СЕРВЕР: Фоновое пакетное удаление (\(messages.count) шт/) успешно завершено")
+                Log.debug(.media, "СЕРВЕР: Фоновое пакетное удаление (\(messages.count) шт/) успешно завершено")
             } catch {
-                print("СЕРВЕР: Ошибка фонового массового удаления: \(error.localizedDescription)")
+                Log.error(.media, "СЕРВЕР: Ошибка фонового массового удаления: \(error.localizedDescription)")
             }
         }
     }
@@ -1361,7 +1361,7 @@ class SupabaseChatService: ChatServiceProtocol {
             let height = dimensions?.1
             let caption = (index == 0) ? text : nil
             
-            print("СЕРВЕР/ОТПРАВКА: Размеры: w = \(String(describing: width)), h = \(String(describing: height)), формат: \(fileExtension), размер: \(resizedData.count / 1024)KB, сжатие: \(rawData.count > skipCompressionThreshold ? "да" : "нет")")
+            Log.debug(.media, "СЕРВЕР/ОТПРАВКА: Размеры: w = \(String(describing: width)), h = \(String(describing: height)), формат: \(fileExtension), размер: \(resizedData.count / 1024)KB, сжатие: \(rawData.count > skipCompressionThreshold ? "да" : "нет")")
             
             // Для маленьких файлов thumbnail = оригинал (чёткое отображение в пузыре)
             let thumbData: Data
@@ -1444,7 +1444,7 @@ class SupabaseChatService: ChatServiceProtocol {
                     guard let msgUUID = UUID(uuidString: msgIdStr),
                           let chatUUID = UUID(uuidString: chatId),
                           let senderUUID = UUID(uuidString: myUserIdStr) else {
-                        print("MEDIA: Invalid UUID — msgId: \(msgIdStr), chatId: \(chatId), sender: \(myUserIdStr)")
+                        Log.error(.media, "MEDIA: Invalid UUID — msgId: \(msgIdStr), chatId: \(chatId), sender: \(myUserIdStr)")
                         return
                     }
 
@@ -1877,7 +1877,7 @@ class SupabaseChatService: ChatServiceProtocol {
         
         guard !events.isEmpty else { return }  // нет событий — курсор НЕ двигаем
 
-        print("SYNC: Получено \(events.count) пропущенных событий")
+        Log.info(.sync, "SYNC: Получено \(events.count) пропущенных событий")
 
         // Курсор двигаем только по НЕПРЕРЫВНОМУ применённому префиксу: событие для ещё не
         // подгруженного пагинацией сообщения оставляет курсор до него — переиграем позже
@@ -1947,13 +1947,13 @@ class SupabaseChatService: ChatServiceProtocol {
         if let cursor = appliedPrefixCursor {
             UserDefaults.standard.set(cursor, forKey: "lastEventSyncDate")
         }
-        print("SYNC: обработано \(events.count); курсор=\(appliedPrefixCursor ?? "без сдвига")")
+        Log.info(.sync, "SYNC: обработано \(events.count); курсор=\(appliedPrefixCursor ?? "без сдвига")")
     }
     
     /// Редактирование текстового сообщения (только своё, в пределах TTL)
     func editMessage(_ message: Message, newText: String, context: ModelContext) async throws {
         guard message.canEdit else {
-            print("EDIT: Нельзя редактировать — TTL истёк или не текстовое")
+            Log.debug(.chat, "EDIT: Нельзя редактировать — TTL истёк или не текстовое")
             return
         }
         guard let msgUUID = UUID(uuidString: message.id),
@@ -1998,7 +1998,7 @@ class SupabaseChatService: ChatServiceProtocol {
         }
         
         NotificationCenter.default.post(name: .messageStatusChanged, object: message.chatId)
-        print("EDIT: Сообщение отредактировано: \(message.id)")
+        Log.debug(.chat, "EDIT: Сообщение отредактировано: \(message.id)")
     }
     
     /// Удаление с TTL-логикой:
@@ -2051,7 +2051,7 @@ class SupabaseChatService: ChatServiceProtocol {
                 do {
                     _ = try await client.storage.from("chat_media").remove(paths: [fileName])
                 } catch {
-                    print("EPHEMERAL DELETE: Ошибка удаления медиа: \(error.localizedDescription)")
+                    Log.error(.media, "EPHEMERAL DELETE: Ошибка удаления медиа: \(error.localizedDescription)")
                 }
             }
             
@@ -2060,7 +2060,7 @@ class SupabaseChatService: ChatServiceProtocol {
                 context.delete(dbMessage)
             }
             
-            print("EPHEMERAL DELETE: Глобальное удаление — \(msgId)")
+            Log.debug(.chat, "EPHEMERAL DELETE: Глобальное удаление — \(msgId)")
         } else {
             // === ЛОКАЛЬНОЕ СКРЫТИЕ (чужое или своё > TTL) ===
             
@@ -2069,7 +2069,7 @@ class SupabaseChatService: ChatServiceProtocol {
                 dbMessage.isHiddenLocally = true
             }
             
-            print("EPHEMERAL DELETE: Локальное скрытие — \(msgId)")
+            Log.debug(.chat, "EPHEMERAL DELETE: Локальное скрытие — \(msgId)")
         }
         
         // 5. Обновляем snapshot чата
@@ -2117,7 +2117,7 @@ class SupabaseChatService: ChatServiceProtocol {
             NotificationCenter.default.post(name: .messageStatusChanged, object: chatId)
         }
         
-        print("EPHEMERAL BATCH: \(globalDeletes.count) удалено у всех, \(localHides.count) скрыто локально")
+        Log.debug(.chat, "EPHEMERAL BATCH: \(globalDeletes.count) удалено у всех, \(localHides.count) скрыто локально")
     }
     
     // MARK: - TODO: Backup

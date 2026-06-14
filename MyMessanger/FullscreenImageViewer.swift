@@ -277,7 +277,7 @@ struct FullscreenImageViewer: View {
                 fullImage = image
             }
         } catch {
-            print("FullscreenImageViewer: Ошибка загрузки \(error.localizedDescription)")
+            Log.error(.media, "FullscreenImageViewer: Ошибка загрузки \(error.localizedDescription)")
         }
         
         isLoading = false

@@ -194,7 +194,7 @@ struct ContentView: View
             }
         }
         .onChange(of: router.appWakeUpTrigger) { _, _ in
-            print("СЕРВЕР: Сигнал пробуждения дошел до списка чатов! Обновляем...")
+            Log.debug(.app, "СЕРВЕР: Сигнал пробуждения дошел до списка чатов! Обновляем...")
             Task {
                 await viewModel.loadChats(context: context, showLoadingIndicator: false)
             }
@@ -261,7 +261,7 @@ struct ContentView: View
                 chat = viewModel.chats.first { $0.id.lowercased() == target }
             }
             guard let chat else {
-                print("DEEP-LINK: чат \(target) не найден локально — не открываем")
+                Log.debug(.deeplink, "DEEP-LINK: чат \(target) не найден локально — не открываем")
                 return
             }
             // Атомарная замена стека навигации ровно на [chat] (поверх корня-списка),

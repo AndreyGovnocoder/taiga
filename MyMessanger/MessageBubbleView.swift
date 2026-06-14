@@ -562,7 +562,7 @@ func saveImageToPhotos(url: URL) async {
             NotificationCenter.default.post(name: .imageSavedToPhotos, object: nil)
         }
     } catch {
-        print("SaveImage: Ошибка загрузки \(error.localizedDescription)")
+        Log.error(.media, "SaveImage: Ошибка загрузки \(error.localizedDescription)")
     }
 }
 

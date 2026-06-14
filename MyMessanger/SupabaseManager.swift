@@ -147,9 +147,9 @@ extension SupabaseManager {
                 .update(["apns_token": token])
                 .eq("id", value: userUUID)
                 .execute()
-            print("СЕРВЕР: APNs токен успешно привязан к профилю")
+            Log.debug(.push, "СЕРВЕР: APNs токен успешно привязан к профилю")
         } catch {
-            print("СЕРВЕР: Ошибка привязки токен: \(error.localizedDescription)")
+            Log.error(.push, "СЕРВЕР: Ошибка привязки токен: \(error.localizedDescription)")
         }
     }
 }
